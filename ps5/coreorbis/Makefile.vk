@@ -71,6 +71,7 @@ CXXFLAGS := -Wall -g -O3 -DNDEBUG -std=c++20 -march=znver2 -msse4.1 -mavx2 -mno-
   -I$(RYML)/src \
   -I$(RYML)/ext/c4core.src \
   -I$(PCSX2)/3rdparty/vulkan/include -I$(SHADERC_INCLUDE) \
+  -I$(PCSX2)/3rdparty/libchdr/include \
   -DENABLE_VULKAN=1 -DORBIS_VULKAN=1 -DPS5SX2_ACHIEVEMENTS=1
 
 RYML_SRCS := $(RYML)/src/c4/yml/common.cpp \
@@ -454,6 +455,7 @@ $(patsubst $(PCSX2)/%.c,$(OBJDIR)/%.o,$(CHD_CSRCS)): CFLAGS += $(CHD_INCLUDES) -
 # b176: the 7z reader's SDK files (single-threaded, quiet), and the reader itself (our code: warnings on; the SDK's headers are included as system headers)
 $(patsubst $(PCSX2)/%.c,$(OBJDIR)/%.o,$(SZ7_CSRCS)): CFLAGS += $(SZ7_INCLUDES) -DZ7_ST -w
 $(OBJDIR)/pcsx2/CDVD/ChdFileReader.o $(OBJDIR)/frontend/fe_games.o: CXXFLAGS += -I$(PCSX2)/3rdparty/libchdr/include
+
 $(OBJDIR)/pcsx2/CDVD/CsoFileReader.o $(OBJDIR)/frontend/fe_games.o: CXXFLAGS += $(CSO_INCLUDES)
 # vk-285-113: the settings page's server thread runs fe_web.cpp's handlers and fe_games.cpp's scans; a 64 KB array in
 # one of them ended the app the first time the page opened. Warn about any frame over 12 KB in them (vk-285-114: and in

@@ -169,6 +169,16 @@
     <ClCompile Include="DEV9\ATA\ATA_Transfer.cpp" />
     <ClCompile Include="DEV9\ATA\HddCreate.cpp" />
     <ClCompile Include="DEV9\DEV9.cpp" />
+    <ClCompile Include="DEV9\ACRAM.cpp" />
+    <ClCompile Include="DEV9\ACSRAM.cpp" />
+    <ClCompile Include="DEV9\ACATA.cpp" />
+    <ClCompile Include="DEV9\ACATA_IO.cpp" />
+    <ClCompile Include="DEV9\ACATA_IO_CHD.cpp" />
+    <ClCompile Include="DEV9\ACATAPI.cpp" />
+    <ClCompile Include="DEV9\ACJV.cpp" />
+    <ClCompile Include="DEV9\ACUART.cpp" />
+    <ClCompile Include="DEV9\ACUART_GLUE.cpp" />
+    <ClCompile Include="DEV9\ACCORE.cpp" />
     <ClCompile Include="DEV9\flash.cpp" />
     <ClCompile Include="DEV9\InternalServers\DHCP_Logger.cpp" />
     <ClCompile Include="DEV9\InternalServers\DHCP_Server.cpp" />
@@ -248,6 +258,8 @@
     <ClCompile Include="GS\Renderers\Vulkan\vk_mem_alloc.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="Host\AudioRateController.cpp" />
+    <ClCompile Include="Host\AudioRateResampler.cpp" />
     <ClCompile Include="Host\AudioStream.cpp" />
     <ClCompile Include="Host\CubebAudioStream.cpp" />
     <ClCompile Include="Host\SDLAudioStream.cpp" />
@@ -275,6 +287,7 @@
     </ClCompile>
     <ClCompile Include="Host.cpp" />
     <ClCompile Include="Input\DInputSource.cpp" />
+    <ClCompile Include="Input\RawInputSource.cpp" />
     <ClCompile Include="Input\InputManager.cpp" />
     <ClCompile Include="Input\InputSource.cpp" />
     <ClCompile Include="Input\SDLInputSource.cpp" />
@@ -697,6 +710,8 @@
     <ClInclude Include="GS\Renderers\Vulkan\VKSwapChain.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="Host\AudioRateController.h" />
+    <ClInclude Include="Host\AudioRateResampler.h" />
     <ClInclude Include="Host\AudioStream.h" />
     <ClInclude Include="Host\AudioStreamTypes.h" />
     <ClInclude Include="ImGui\FullscreenUI.h" />
@@ -721,6 +736,7 @@
     </ClInclude>
     <ClInclude Include="Host.h" />
     <ClInclude Include="Input\DInputSource.h" />
+    <ClInclude Include="Input\RawInputSource.h" />
     <ClInclude Include="Input\InputManager.h" />
     <ClInclude Include="Input\InputSource.h" />
     <ClInclude Include="Input\SDLInputSource.h" />

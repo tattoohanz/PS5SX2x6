@@ -169,7 +169,7 @@ std::string Host::GetHTTPUserAgent()
 	rc_client_get_user_agent_clause(nullptr, clause, sizeof(clause)); // "rcheevos/12.4.0"
 	return OrbisUserAgentProduct() + " " + clause;
 #else
-	return fmt::format("PCSX2 {} ({})", BuildVersion::GitRev, GetOSVersionString());
+	return fmt::format("PCSX2x6 {} ({})", BuildVersion::GitRev, GetOSVersionString());
 #endif
 }
 

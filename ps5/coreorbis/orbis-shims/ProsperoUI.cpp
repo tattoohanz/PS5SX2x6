@@ -234,6 +234,15 @@ void ClearSoftwareCursor(u32 index)
 {
   (void)index;
 }
+// PS5SX2x6: pcsx2x6's bezel picture around the game; headless here, as the other overlays.
+void SetBezelOverlay(bool enabled, std::string image_path, float opacity, float scale, BezelFitMode fit_mode)
+{
+  (void)enabled;
+  (void)image_path;
+  (void)opacity;
+  (void)scale;
+  (void)fit_mode;
+}
 void SetSoftwareCursorPosition(u32 index, float pos_x, float pos_y)
 {
   (void)index;

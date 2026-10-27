@@ -318,6 +318,17 @@ set(pcsx2DEV9Sources
 	DEV9/flash.cpp
 	DEV9/pcap_io.cpp
 	DEV9/net.cpp
+#ARCADE
+	DEV9/ACRAM.cpp
+	DEV9/ACSRAM.cpp
+	DEV9/ACATA.cpp
+	DEV9/ACATA_IO.cpp
+	DEV9/ACATA_IO_CHD.cpp
+	DEV9/ACATAPI.cpp
+	DEV9/ACJV.cpp
+	DEV9/ACUART.cpp
+	DEV9/ACUART_GLUE.cpp
+	DEV9/ACCORE.cpp
 	)
 
 # DEV9 headers
@@ -829,11 +840,15 @@ set(pcsx2DebugToolsHeaders
 	DebugTools/BiosDebugData.h)
 
 set(pcsx2HostSources
+	Host/AudioRateController.cpp
+	Host/AudioRateResampler.cpp
 	Host/AudioStream.cpp
 	Host/CubebAudioStream.cpp
 	Host/SDLAudioStream.cpp)
 
 set(pcsx2HostHeaders
+	Host/AudioRateController.h
+	Host/AudioRateResampler.h
 	Host/AudioStream.h
 	Host/AudioStreamTypes.h)
 
@@ -890,10 +905,12 @@ if(WIN32)
 	list(APPEND pcsx2InputSources
 		Input/DInputSource.cpp
 		Input/XInputSource.cpp
+		Input/RawInputSource.cpp
 	)
 	list(APPEND pcsx2InputHeaders
 		Input/DInputSource.h
 		Input/XInputSource.h
+		Input/RawInputSource.h
 	)
 endif()
 
@@ -901,6 +918,7 @@ endif()
 set(pcsx2LinuxSources
 	CDVD/Linux/DriveUtility.cpp
 	CDVD/Linux/IOCtlSrc.cpp
+	Input/EvdevInputSource.cpp
 	)
 
 set(pcsx2OSXSources
@@ -915,6 +933,7 @@ set(pcsx2FreeBSDSources
 
 # Linux headers
 set(pcsx2LinuxHeaders
+	Input/EvdevInputSource.h
 	)
 
 # ps2 sources

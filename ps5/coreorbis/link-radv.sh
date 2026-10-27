@@ -161,20 +161,48 @@ ORDER_FILE=${ORBIS_ORDER:-$here/orbis-hot.order}
 if [[ $ORDER_FILE != none && -f $ORDER_FILE ]]; then
   ORDER_ARGS=(--symbol-ordering-file="$ORDER_FILE" --no-warn-symbol-ordering)
 fi
+# The SDK fork's platform library wraps fclose and fflush itself (open_memstream), as the port's NFS shim does
+# (orbis-shims/OrbisNfs.cpp): its two wrappers are renamed here, and the shim's call them for the files that aren't its own.
+PLATFORM_LIB="$OUT/build/libps5platform-chained.a"
+# The NFS shim's C library calls (orbis-shims/OrbisNfs.wrap), wrapped as link-vk.sh wraps them.
+NFS_WRAP=()
+while IFS= read -r name; do
+  [[ -z $name || $name == \#* ]] && continue
+  NFS_WRAP+=("--wrap=$name")
+done < "$here/orbis-shims/OrbisNfs.wrap"
+echo "[link-radv] NFS shares: ${#NFS_WRAP[@]} C library calls wrapped (orbis-shims/OrbisNfs.wrap)"
+# The driver's winsys calls libSceAgc and libSceAgcDriver, system modules: their import stubs, built from the driver
+# checkout's vendor/ps5/sdk/stubs as its own titles build them (PS5_VULKAN_DIR names the checkout).
+AGC_STUBS=()
+AGC_TOOL_STUBS=()
+if [[ -n ${PS5_VULKAN_DIR:-} && -d $PS5_VULKAN_DIR/vendor/ps5/sdk/stubs ]]; then
+  mkdir -p "$OUT/build/stubs"
+  for pair in libSceAgc:agc_canary_link_stub.c libSceAgcDriver:agc_driver_canary_link_stub.c; do
+    lib=${pair%%:*}
+    sh "$NATIVE/tooling/prospero-clang18" -std=c11 -O2 -fPIC -c "$PS5_VULKAN_DIR/vendor/ps5/sdk/stubs/${pair#*:}" \
+      -o "$OUT/build/obj/${lib}_stub.o"
+    "$SDK/bin/prospero-lld" --shared -soname "$lib.prx" -o "$OUT/build/stubs/$lib.so" "$OUT/build/obj/${lib}_stub.o"
+    AGC_STUBS+=("$OUT/build/stubs/$lib.so")
+    AGC_TOOL_STUBS+=(--stub "$OUT/build/stubs/$lib.so")
+  done
+  echo "[link-radv] AGC import stubs from $PS5_VULKAN_DIR/vendor/ps5/sdk/stubs"
+fi
+"${OBJCOPY:-llvm-objcopy-18}" --redefine-sym __wrap_fclose=ps5platform_wrap_fclose \
+  --redefine-sym __wrap_fflush=ps5platform_wrap_fflush "$RADV_PLATFORM" "$PLATFORM_LIB"
 pie_link() {
   # shellcheck disable=SC2086
   "$LLD" -m elf_x86_64 -pie -z max-page-size=0x4000 -mllvm -emulated-tls \
     --hash-style=gnu -T "$NATIVE/tooling/native/ps5-pie.ld" -T "$here/orbis-shims/ehframe.ld" --eh-frame-hdr \
-    --version-script "$NATIVE/tooling/native/app-symbols.map" "${ORDER_ARGS[@]}" "${radv_flags[@]}" "$@" -e _start \
+    --version-script "$NATIVE/tooling/native/app-symbols.map" "${ORDER_ARGS[@]}" "${radv_flags[@]}" "${NFS_WRAP[@]}" "$@" -e _start \
     ${LLD_EXTRA:---no-dynamic-linker} \
     -o "$OUT/build/llvm-pie.elf" $OBJS \
     --whole-archive "$RADV_ARCHIVE" --no-whole-archive \
     "${GLSLANG_LIBS[@]}" \
     -u _Unwind_Backtrace "$SDK"/target/lib/libunwind.a \
-    --as-needed $STUBS \
+    "${AGC_STUBS[@]}" --as-needed $STUBS \
     -L "$SDK"/target/lib \
     "$SDK"/target/lib/libc++.a "$SDK"/target/lib/libc++abi.a \
-    "$SDK"/target/lib/libunwind.a "$SDK"/target/lib/libc.a "$RADV_PLATFORM" "$RADV_BUILTINS" -lpthread
+    "$SDK"/target/lib/libunwind.a "$SDK"/target/lib/libc.a "$PLATFORM_LIB" "$RADV_BUILTINS" -lpthread
 }
 pie_link
 echo "[link-radv] pie link OK"
@@ -194,7 +222,7 @@ if [[ ! -x $TOOL ]]; then
   echo "[link-radv] built $TOOL"
 fi
 "$TOOL" link --in "$OUT/build/llvm-pie.elf" --out "$OUT/build/eboot.elf" \
-  --stub-dir "$SDK/target/lib" --module-sdk 0x02000009 \
+  --stub-dir "$SDK/target/lib" "${AGC_TOOL_STUBS[@]}" --module-sdk 0x02000009 \
   --companion-sdk 0x08050001 --file-name eboot.elf
 echo "[link-radv] native link OK"
 python3 "$PREPARE" --input "$OUT/build/eboot.elf" --output "$OUT/build/eboot-console-ready.elf"

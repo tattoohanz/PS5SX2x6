@@ -47,6 +47,10 @@ int __real_feof(FILE* fp);
 int __real_ferror(FILE* fp);
 int __real_fileno(FILE* fp);
 int __real_fflush(FILE* fp);
+// The SDK fork's libps5platform.a wraps fclose and fflush too (its open_memstream, which Mesa uses). link-radv.sh renames
+// its two wrappers to these; the ones here call them for every file that isn't an NFS one. Not linked: the C library's.
+int ps5platform_wrap_fclose(FILE* fp) __attribute__((weak));
+int ps5platform_wrap_fflush(FILE* fp) __attribute__((weak));
 int __real_fgetc(FILE* fp);
 char* __real_fgets(char* s, int n, FILE* fp);
 int __real_fputc(int c, FILE* fp);
@@ -1157,7 +1161,7 @@ int __wrap_fclose(FILE* fp)
 {
 	const int slot = SlotOfFile(fp);
 	if (slot < 0)
-		return __real_fclose(fp);
+		return ps5platform_wrap_fclose ? ps5platform_wrap_fclose(fp) : __real_fclose(fp);
 	return CloseSlot(slot) == 0 ? 0 : EOF;
 }
 
@@ -1292,7 +1296,7 @@ int __wrap_fileno(FILE* fp)
 int __wrap_fflush(FILE* fp)
 {
 	if (SlotOfFile(fp) < 0)
-		return __real_fflush(fp);
+		return ps5platform_wrap_fflush ? ps5platform_wrap_fflush(fp) : __real_fflush(fp);
 	return 0;
 }
 

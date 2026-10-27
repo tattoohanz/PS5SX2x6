@@ -1448,7 +1448,15 @@ void App::Build(FrameDesc& f, const std::string& clock)
 	// Wordmark (vk-285-50: PS5SX2, "SX2" in the glow's colour) and the author's handles under it.
 	float x = margin;
 	x += m_fonts->AddText(ui, "PS5", x, 150.0f * k, 60.0f * k, white, 0.8f);
-	m_fonts->AddText(ui, "SX2", x + 2.0f * k, 150.0f * k, 60.0f * k, accent, 0.8f);
+	if (m_cfg.arcade)
+	{
+		// PS5SX2x6: its own name, no handles under it (the user's choice).
+		x += m_fonts->AddText(ui, "SX2x6", x + 2.0f * k, 150.0f * k, 60.0f * k, accent, 0.8f) + 2.0f * k;
+		m_fonts->AddText(ui, " System246", x, 150.0f * k, 60.0f * k, white, 0.5f);
+	}
+	else
+		m_fonts->AddText(ui, "SX2", x + 2.0f * k, 150.0f * k, 60.0f * k, accent, 0.8f);
+	if (!m_cfg.arcade)
 	{
 		const float hpx = 32.0f * k, hy2 = 214.0f * k;
 		float hx2 = margin + 2.0f * k;

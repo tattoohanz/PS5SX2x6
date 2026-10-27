@@ -459,7 +459,12 @@ JVS_MODE ACJV::ResolveModeFromGameId(const std::string& gameid)
 
 std::span<const InputBindingInfo> ACJV::GetFightingButtons()
 {
-	auto it = s_fighting_layouts.find(s_gameid);
+	return GetFightingButtonsFor(s_gameid);
+}
+
+std::span<const InputBindingInfo> ACJV::GetFightingButtonsFor(const std::string& gameid)
+{
+	auto it = s_fighting_layouts.find(gameid);
 	if (it == s_fighting_layouts.end())
 		return {};
 	switch (it->second)
@@ -486,7 +491,12 @@ std::span<const ACJV::LayoutInfo> ACJV::GetFightingLayouts()
 
 std::span<const InputBindingInfo> ACJV::GetStandardButtons()
 {
-	auto it = s_standard_layouts.find(s_gameid);
+	return GetStandardButtonsFor(s_gameid);
+}
+
+std::span<const InputBindingInfo> ACJV::GetStandardButtonsFor(const std::string& gameid)
+{
+	auto it = s_standard_layouts.find(gameid);
 	if (it == s_standard_layouts.end())
 		return {};
 	switch (it->second)
@@ -507,7 +517,12 @@ std::span<const ACJV::LayoutInfo> ACJV::GetStandardLayouts()
 
 std::span<const InputBindingInfo> ACJV::GetRacingButtons()
 {
-	auto it = s_racing_layouts.find(s_gameid);
+	return GetRacingButtonsFor(s_gameid);
+}
+
+std::span<const InputBindingInfo> ACJV::GetRacingButtonsFor(const std::string& gameid)
+{
+	auto it = s_racing_layouts.find(gameid);
 	if (it == s_racing_layouts.end())
 		return {};
 	switch (it->second)
@@ -664,6 +679,12 @@ void ACJV::SetGameId(const std::string& gameid)
 		CurrentBoardID = FCB_JPN_TOUCHPANEL; // touch games use the V290 FCB PCB
 	else
 		CurrentBoardID = RAYS_PCB;
+}
+
+const GunMapping* ACJV::GetGunMappingFor(const std::string& gameid)
+{
+	const auto it = s_gun_mappings.find(gameid);
+	return it == s_gun_mappings.end() ? nullptr : &it->second;
 }
 
 const GunMapping& ACJV::GetGunMapping()
@@ -828,6 +849,23 @@ void ACJV::SetTouchCursor(std::string path, float scale, u32 color)
 static void UpdateTouchFromPointer()
 {
 	float wx, wy;
+#ifdef __PROSPERO__
+	// PS5SX2x6: no ImGui window on the PS5 (its size reads 0): the stick's point goes to the picture directly.
+	if (m_touchRelActive)
+	{
+		const float rx = (((m_touchRel[1] > 0.0f) ? m_touchRel[1] : -m_touchRel[0]) + 1.0f) * 0.5f;
+		const float ry = (((m_touchRel[3] > 0.0f) ? m_touchRel[3] : -m_touchRel[2]) + 1.0f) * 0.5f;
+		if (!(m_touchPressBound ? m_touchPressed : false))
+		{
+			m_jvsScreenPosX[0] = 0xFFFF;
+			m_jvsScreenPosY[0] = 0xFFFF;
+			return;
+		}
+		m_jvsScreenPosX[0] = std::min<u16>(static_cast<u16>(std::clamp(rx, 0.0f, 1.0f) * 0xFFFF), 0xFFFE);
+		m_jvsScreenPosY[0] = std::min<u16>(static_cast<u16>((1.0f - std::clamp(ry, 0.0f, 1.0f)) * 0xFFFF), 0xFFFE); // bottom-up
+		return;
+	}
+#endif
 	if (m_touchRelActive)
 	{
 		wx = (((m_touchRel[1] > 0.0f) ? m_touchRel[1] : -m_touchRel[0]) + 1.0f) * 0.5f * ImGuiManager::GetWindowWidth();

@@ -152,6 +152,11 @@ namespace ACJV {
     std::span<const InputBindingInfo> GetRacingButtons(); // empty if none
     struct RacingLayoutInfo { const char* name; std::span<const InputBindingInfo> buttons; };
     std::span<const RacingLayoutInfo> GetRacingLayouts();
+    // PS5SX2x6: the same tables by a gameid, for a game that isn't running (the PS5 shelf's Controls page, the DualSense mapping).
+    std::span<const InputBindingInfo> GetFightingButtonsFor(const std::string& gameid);
+    std::span<const InputBindingInfo> GetStandardButtonsFor(const std::string& gameid);
+    std::span<const InputBindingInfo> GetRacingButtonsFor(const std::string& gameid);
+    const GunMapping* GetGunMappingFor(const std::string& gameid); // null: not a gun game
     struct JvsMacroSwitch { const char* name; const char* label; u16 bit; };
     std::span<const JvsMacroSwitch> GetMacroSwitches(); // fixed JVS switches a macro can fire (game-independent)
     std::string LayoutKey(std::span<const InputBindingInfo> buttons); // stable per-layout config key (button-name prefix)

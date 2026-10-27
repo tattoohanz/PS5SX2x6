@@ -60,6 +60,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "SIO/Pad/Pad.h"
 #include "SIO/Pad/PadDualshock2.h"
 #include "DEV9/ACJV.h"              // PS5SX2x6: the arcade games' JVS I/O board (pcsx2x6)
+#include "orbis-shims/OrbisArcadeControls.h" // PS5SX2x6: each game's DualSense controls
 #include "SIO/Memcard/MemoryCardFile.h" // vk-285-48: FileMcd_EmuClose/Open
 #include "CDVD/CDVD.h"                  // vk-285-48: cdvdSaveNVRAM
 #include "SPU2/spu2.h"                  // vk-285-48: SPU2::SetOutputPaused
@@ -853,101 +854,21 @@ static bool orbis_is_acgame(const std::string &path)
 // (a System 246/256 has no controller in its ports).
 static std::atomic<bool> g_orbis_arcade{false};
 
-// PS5SX2x6 (needs proper testing): player 1's DualSense as the cabinet's controls, through pcsx2x6's JVS board (DEV9/ACJV).
-// Every game: Options Start, Cross Button 1 (the test menu's ENTER), the D-pad the JVS lever, touchpad click Service, L3
-// a coin, R3 the Test switch (on/off). L3 and R3 act alone only: held together they stay PS5SX2's combos. Driving games
-// (ACJV's DRIVE mode: Wangan Midnight, Ridge Racer V, ...): the left stick steers, R2 accelerates, L2 brakes, and their
-// layout's shift up, shift down and view (ACJV::GetRacingButtons) are R1, L1 and Triangle. Other games: Square, Triangle,
-// Circle and Cross are Buttons 1, 2, 5 and 4, as pcsx2x6's defaults. Each change is logged ([jvs]), the sticks' once.
+// PS5SX2x6: player 1's DualSense as the cabinet's controls, through pcsx2x6's JVS board (DEV9/ACJV), by the game's table
+// (orbis-shims/OrbisArcadeControls.cpp: pcsx2x6's own layouts and default pad buttons, the cabinet's Start, coin, Test,
+// Service and Enter; the shelf's Controls page shows the same table). The table is logged when the game starts, and each
+// press ([jvs]).
 static void orbis_jvs_apply(const OrbisPadData &d)
 {
-  static uint32_t s_prev_buttons = 0;
-  static u16 s_prev_mask = 0;
-  static bool s_logged_mode = false, s_logged_steer = false, s_logged_gas = false, s_logged_brake = false;
-  const uint32_t b = d.buttons;
-  const uint32_t pressed = b & ~s_prev_buttons;
-  const JVS_MODE mode = ACJV::GetMode();
-  const bool drive = mode == JVS_MODE::DRIVE;
-  if (!s_logged_mode)
-  {
-    printf("[jvs] player 1 on the JVS board: mode %d (%s), game %s\n", static_cast<int>(mode), drive ? "driving" : "buttons",
-      ACJV::GetGameId().c_str());
-    fflush(stdout);
-    s_logged_mode = true;
-  }
-
-  u16 mask = 0;
-  if (b & 0x00000008u) mask |= JVS_BTN_START;   // Options
-  if (b & 0x00004000u) mask |= JVS_BTN_1;       // Cross
-  if (b & 0x00100000u) mask |= JVS_BTN_SERVICE; // touchpad click
-  if (b & 0x00000010u) mask |= JVS_BTN_UP;
-  if (b & 0x00000040u) mask |= JVS_BTN_DOWN;
-  if (b & 0x00000080u) mask |= JVS_BTN_LEFT;
-  if (b & 0x00000020u) mask |= JVS_BTN_RIGHT;
-  if (drive)
-  {
-    for (const InputBindingInfo &bi : ACJV::GetRacingButtons())
-    {
-      const std::string_view name(bi.name);
-      const uint32_t bit = name.ends_with("ShiftUp") ? 0x00000800u : name.ends_with("ShiftDown") ? 0x00000400u :
-                           name.ends_with("View") ? 0x00001000u : 0u;
-      if (bit && (b & bit))
-        mask |= static_cast<u16>(bi.bind_index);
-    }
-    const int steer = static_cast<int>(d.lx) - 128;
-    const float dz = 10.0f;
-    const float right = steer > dz ? std::min(1.0f, (steer - dz) / (127.0f - dz)) : 0.0f;
-    const float left = steer < -dz ? std::min(1.0f, (-steer - dz) / (128.0f - dz)) : 0.0f;
-    ACJV::SetWheelAxis(0, right);
-    ACJV::SetWheelAxis(1, left);
-    ACJV::SetWheelAxis(2, d.r2 / 255.0f);
-    ACJV::SetWheelAxis(3, d.l2 / 255.0f);
-    if (!s_logged_steer && (right > 0.5f || left > 0.5f))
-    {
-      printf("[jvs] steering: %s (left stick x %u)\n", right > 0.5f ? "right" : "left", d.lx);
-      s_logged_steer = true;
-    }
-    if (!s_logged_gas && d.r2 > 128)
-    {
-      printf("[jvs] accelerator: R2 %u\n", d.r2);
-      s_logged_gas = true;
-    }
-    if (!s_logged_brake && d.l2 > 128)
-    {
-      printf("[jvs] brake: L2 %u\n", d.l2);
-      s_logged_brake = true;
-    }
-  }
-  else
-  {
-    if (b & 0x00008000u) mask |= JVS_BTN_1; // Square
-    if (b & 0x00001000u) mask |= JVS_BTN_2; // Triangle
-    if (b & 0x00002000u) mask |= JVS_BTN_5; // Circle
-    if (b & 0x00004000u) mask |= JVS_BTN_4; // Cross
-  }
-  if (const u16 up = s_prev_mask & ~mask)
-    ACJV::SetButtonState(0, up, false);
-  if (const u16 down = mask & ~s_prev_mask)
-  {
-    ACJV::SetButtonState(0, down, true);
-    printf("[jvs] pressed: mask %04x (buttons %08x)\n", down, b);
-  }
-  s_prev_mask = mask;
-
-  const bool l3 = (b & 0x2u) != 0, r3 = (b & 0x4u) != 0;
-  if ((pressed & 0x2u) && !r3)
-  {
-    ACJV::InsertCoin(0);
-    printf("[jvs] coin (L3): %d credit(s) inserted on slot 1 so far\n", static_cast<int>(ACJV::coin[0]));
-  }
-  if ((pressed & 0x4u) && !l3)
-  {
-    ACJV::ToggleDIPSwitchState(0);
-    printf("[jvs] test switch (R3): %s\n", ACJV::GetDIPSwitchState(0) ? "on" : "off");
-  }
-  if (pressed)
-    fflush(stdout);
-  s_prev_buttons = b;
+  orbis_arcade::Pad pad;
+  pad.buttons = d.buttons;
+  pad.lx = d.lx;
+  pad.ly = d.ly;
+  pad.rx = d.rx;
+  pad.ry = d.ry;
+  pad.l2 = d.l2;
+  pad.r2 = d.r2;
+  orbis_arcade::Apply(pad);
 }
 
 static void orbis_rumble_send(int index, int32_t handle, OrbisRumbleOut &out)

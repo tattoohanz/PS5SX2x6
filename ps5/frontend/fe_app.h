@@ -79,6 +79,9 @@ struct AppConfig
 	// and serial (false when none); drive_disc_reask asks the watcher about it again (the question comes back as disc_ask_poll's).
 	std::function<bool(std::string& title, std::string& serial)> drive_disc_poll;
 	std::function<void()> drive_disc_reask;
+	// PS5SX2x6: the arcade games' title. No R2 search, no size under the title, no achievements tab on the sheet (the host
+	// leaves the achievements, the texture packs, the online patches, the memory cards and the QR code unset too).
+	bool arcade = false;
 	// 2.11: the shelf's search, from the settings page on a phone or PC. search_remote gives the text the page set since the last
 	// call (true; "" clears the search); search_report tells the page what the shelf is searching for (it shows it in its box).
 	std::function<bool(std::string& text)> search_remote;
@@ -191,6 +194,7 @@ private:
 	// vk-285-114: the options sheet.
 	void OpenSheet(bool global);
 	void SheetTab(int tab); // vk-285-116
+	int TabCount() const { return m_cfg.arcade ? kTabAchievements : kTabCount; } // PS5SX2x6: no achievements tab
 	void CloseSheet();
 	void UpdateSheet(double dt, const Input& in);
 	bool SheetMove(int dir); // false at either end

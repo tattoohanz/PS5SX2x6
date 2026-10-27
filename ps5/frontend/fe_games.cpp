@@ -1149,6 +1149,8 @@ void ScanDir(const std::string& dir, std::vector<GameInfo>& games, std::vector<s
 				g.title = g.serial.empty() ? g.stem : g.serial;
 			g.region.clear();
 			g.extra.clear();
+			const std::string platform = AcgameValue(g.path, "platform");
+			g.platform = platform == "256" ? "System 256" : platform == "super256" ? "Super System 256" : "System 246";
 		}
 		games.push_back(g);
 	}

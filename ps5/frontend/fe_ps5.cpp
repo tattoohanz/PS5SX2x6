@@ -2038,12 +2038,16 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 	App app;
 	AppConfig acfg;
 #ifdef PS5SX2_ACHIEVEMENTS
-	acfg.achievements = OrbisAchievementsAccountService();
-	acfg.game_achievements = OrbisAchievementsBrowserService();
-	g_ime.user = user;
-	acfg.text_entry.open = SystemKeyboardOpen;
-	acfg.text_entry.poll = SystemKeyboardPoll;
+	if (!paths.arcade) // PS5SX2x6: RetroAchievements has no sets for the arcade games
+	{
+		acfg.achievements = OrbisAchievementsAccountService();
+		acfg.game_achievements = OrbisAchievementsBrowserService();
+		g_ime.user = user;
+		acfg.text_entry.open = SystemKeyboardOpen;
+		acfg.text_entry.poll = SystemKeyboardPoll;
+	}
 #endif
+	acfg.arcade = paths.arcade;
 	acfg.build_tag = build_tag ? build_tag : "";
 	acfg.test_build = paths.test_build;   // test build 1: the TESTING watermark
 	acfg.build_label = paths.build_label;
@@ -2054,7 +2058,7 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 	acfg.options.settings_dir = paths.settings_dir;
 	acfg.options.gs_ini = paths.gs_ini;
 	acfg.options.patches_dir = paths.patches_dir;
-	acfg.options.memcards_dir = paths.memcards_dir;
+	acfg.options.memcards_dir = paths.arcade ? std::string() : paths.memcards_dir; // PS5SX2x6: the dongle isn't a memory card to pick
 	acfg.options.presets.assign(reinterpret_cast<const char*>(fe_presets), static_cast<size_t>(fe_presets_end - fe_presets));
 	{
 		const std::string log_path = paths.settings_log;
@@ -2235,7 +2239,7 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 	// vk-285-50: the QR tile's address, looked up again every few seconds in case the IP changes.
 	double web_checked = -1e9;
 	auto refresh_web = [&](double now) {
-		if (!g_web || now - web_checked < 3.0)
+		if (!g_web || paths.arcade || now - web_checked < 3.0) // PS5SX2x6: no QR code on the arcade shelf
 			return;
 		web_checked = now;
 		std::string url, shown;

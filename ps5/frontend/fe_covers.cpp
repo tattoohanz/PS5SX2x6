@@ -77,6 +77,12 @@ void MakeDirs(const std::string& path)
 	}
 }
 
+// PS5SX2x6: the painted case's band: an arcade game's board ("System 246"), else "PlayStation 2".
+const char* CaseBand(const GameInfo& g)
+{
+	return g.platform.empty() ? "PlayStation\xC2\xAE" "2" : g.platform.c_str();
+}
+
 // vk-285-110: for CoverFinder.
 constexpr const char* kImageExts[] = {".jpg", ".png", ".jpeg"};
 
@@ -580,7 +586,7 @@ void CoverService::PaintSpine(const Fonts& fonts, const GameInfo& g, CoverImage&
 	std::vector<uint8_t> a;
 	int tw, th, base;
 	// "PlayStation 2" at the top, the title, and the serial at the foot, all reading downwards.
-	fonts.Raster("PlayStation\xC2\xAE" "2", 25.0f, a, tw, th, base);
+	fonts.Raster(CaseBand(g), 25.0f, a, tw, th, base);
 	DrawAlpha(out, a, tw, th, (W - th) / 2, 40, 0xe8e8e8, true);
 	const int title_top = 60 + tw + 70, title_bottom = H - 190;
 	float px = 44.0f;
@@ -629,7 +635,7 @@ void CoverService::PaintPlaceholder(const Fonts& fonts, const GameInfo& g, Cover
 	}
 	std::vector<uint8_t> a;
 	int tw, th, base;
-	fonts.Raster("PlayStation\xC2\xAE" "2", 19.0f, a, tw, th, base);
+	fonts.Raster(CaseBand(g), 19.0f, a, tw, th, base);
 	DrawAlpha(out, a, tw, th, 12, 18 - base + 6, 0xffffff, false);
 	const std::vector<std::string> lines = Wrap(fonts, g.title, 38.0f, W - 44.0f, 5);
 	const float line_h = 46.0f;
@@ -1415,7 +1421,7 @@ void CoverService::PaintBackPlaceholder(const Fonts& fonts, const GameInfo& g, C
 	}
 	std::vector<uint8_t> a;
 	int tw, th, base;
-	fonts.Raster("PlayStation\xC2\xAE" "2", 14.0f, a, tw, th, base);
+	fonts.Raster(CaseBand(g), 14.0f, a, tw, th, base);
 	DrawAlpha(out, a, tw, th, 9, 13 - base + 4, 0xffffff, false);
 	const std::vector<std::string> lines = Wrap(fonts, g.title, 25.0f, W - 36.0f, 4);
 	const float line_h = 31.0f;

@@ -2792,6 +2792,11 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   fe.cheats_dir = OrbisDir("cheats");
   fe.online_patch_manifest = OrbisDir("cache") + "/online-patches.txt";
   fe.online_patches = !orbis_flag("noonlinepatches");
+  // PS5SX2x6: the arcade games' shelf: no RetroAchievements, memory cards, QR code, search or image size; no HD texture packs
+  // or patches and cheats from GitHub (they are the PS2 games').
+  fe.arcade = true;
+  fe.texture_packs = false;
+  fe.online_patches = false;
   return fe;
 }
 

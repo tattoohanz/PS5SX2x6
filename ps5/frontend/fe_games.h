@@ -32,6 +32,9 @@ struct GameInfo
 	// vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): PS5SX2/HideGame=true in its own settings
 	// file (ReadBadges). The shelf leaves it out unless gs.ini's PS5SX2/ShowHiddenGames is on, and then shows it dimmed.
 	bool hidden = false;
+	// PS5SX2x6: an arcade game's board, from its .acgame's platform ("System 246", "System 256", "Super System 256"); the painted
+	// case's band shows it instead of "PlayStation 2". Empty for a PS2 disc image.
+	std::string platform;
 };
 
 // A disc image's file name: .iso, (vk-285-108) .chd, (vk-285-113) .cso or .zso, (2026-10-08) .bin or .img, in any case,

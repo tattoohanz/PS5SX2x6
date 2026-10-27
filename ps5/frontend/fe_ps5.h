@@ -54,6 +54,9 @@ struct OrbisFrontendPaths
 	std::string cheats_dir;
 	std::string online_patch_manifest;
 	bool online_patches = true;
+	// PS5SX2x6: the arcade games' title: the shelf leaves out what only PS2 games have (RetroAchievements, the memory cards, the
+	// QR code of the settings page, the search, the size of the image; AppConfig::arcade).
+	bool arcade = false;
 	// vk-285-134 (AI-assisted): the PS2 BIOS (build 130's logs: 961 starts on 235 consoles without one). bios_check looks
 	// again (a BIOS in an archive is taken out) and says whether PCSX2 finds one; bios_problem is then what was found
 	// instead (a sentence); bios_dir where the BIOS goes. Unset: the shelf doesn't check.

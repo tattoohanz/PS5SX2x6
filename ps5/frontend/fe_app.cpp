@@ -1127,7 +1127,7 @@ void App::Update(double dt, const Input& in)
 				}
 			}
 			// 2.11: R2 searches; Circle puts the whole shelf back while a search narrows it (and the QR view isn't up).
-			else if (!m_qr_big && in.r2 && !m_prev.r2 && m_sheet_anim < 0.05f && !m_launching)
+			else if (!m_cfg.arcade && !m_qr_big && in.r2 && !m_prev.r2 && m_sheet_anim < 0.05f && !m_launching)
 			{
 				OpenSearch();
 				Sound(Sfx::Move, 0.3f);
@@ -1516,7 +1516,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 			add("Copying " + std::to_string(m_dump_pct) + "%");
 			else if (m_index[static_cast<size_t>(m_selected)] == kDriveIndex) // 2.11 (review): no size
 			add("In the drive");
-			else
+			else if (!m_cfg.arcade) // PS5SX2x6: an .acgame's size says nothing
 			add(SizeText(g.bytes));
 		if (!g.damaged.empty())
 			add("can't be read"); // vk-285-134
@@ -1691,7 +1691,9 @@ void App::Build(FrameDesc& f, const std::string& clock)
 			const std::string scope = std::string(Tr(Str::SheetThisGame)) + " / " + Tr(Str::SheetAllGames);
 			hint("#L1", "#R1", scope.c_str());
 		}
-		const std::string tabs = std::string(Tr(Str::HintSettings)) + " / " + Tr(Str::SheetControls) + " / " + Tr(Str::Achievements); // vk-285-116
+		std::string tabs = std::string(Tr(Str::HintSettings)) + " / " + Tr(Str::SheetControls); // vk-285-116
+		if (TabCount() > kTabAchievements)
+			tabs += std::string(" / ") + Tr(Str::Achievements);
 		hint("#L2", "#R2", tabs.c_str());
 	}
 	else
@@ -1705,7 +1707,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 			hint("#L1", "#R1", Tr(Str::HintJump));
 		}
 		hint(icon::Square, nullptr, Tr(Str::HintSettings)); // vk-285-114
-		if (!m_qr_big)
+		if (!m_qr_big && !m_cfg.arcade)
 		{
 			hint("#R2", nullptr, "Search"); // 2.11
 			if (!m_search.applied.empty())
@@ -2105,7 +2107,7 @@ void App::UpdateSheet(double dt, const Input& in)
 	if (pressed(in.l2, m_prev.l2) || pressed(in.r2, m_prev.r2))
 	{
 		const int direction = pressed(in.r2, m_prev.r2) ? 1 : -1;
-		const int tab = std::max(0, std::min(kTabCount - 1, m_sheet.tab() + direction));
+		const int tab = std::max(0, std::min(TabCount() - 1, m_sheet.tab() + direction));
 		if (tab != m_sheet.tab())
 		{
 			SheetTab(tab);
@@ -2902,10 +2904,11 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 		const float r2w = m_fonts->Measure("R2", kpx) + 20 * k;
 		key_pill("R2", cx + inner - 16 * k - r2w);
 		const float sx0 = cx + 16 * k + l2 + 14 * k, sx1 = cx + inner - 16 * k - r2w - 14 * k;
-		const float seg = (sx1 - sx0) / 3.0f;
+		const int tabs = TabCount(); // PS5SX2x6: two without the achievements
+		const float seg = (sx1 - sx0) / static_cast<float>(tabs);
 		const int shown = m_sheet.tab() == kTabControls ? 1 : m_sheet.tab() == kTabAchievements ? 2 : 0;
 		const char* const names[3] = {Tr(Str::HintSettings), Tr(Str::SheetControls), Tr(Str::Achievements)};
-		for (int t = 0; t < 3; t++)
+		for (int t = 0; t < tabs; t++)
 		{
 			const float sx = sx0 + t * seg;
 			const bool on = t == shown;

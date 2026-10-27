@@ -59,6 +59,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "OrbisDriver.h" // vk-285-115: ps5vk or RADV
 #include "SIO/Pad/Pad.h"
 #include "SIO/Pad/PadDualshock2.h"
+#include "DEV9/ACJV.h"              // PS5SX2x6: the arcade games' JVS I/O board (pcsx2x6)
 #include "SIO/Memcard/MemoryCardFile.h" // vk-285-48: FileMcd_EmuClose/Open
 #include "CDVD/CDVD.h"                  // vk-285-48: cdvdSaveNVRAM
 #include "SPU2/spu2.h"                  // vk-285-48: SPU2::SetOutputPaused
@@ -842,6 +843,113 @@ struct OrbisRumbleOut
   u32 sent = 0;
   unsigned logged = 0;
 };
+// PS5SX2x6: a pcsx2x6 arcade game's manifest (.acgame: its game ID, and the media, dongle and boot ELF VMManager loads).
+static bool orbis_is_acgame(const std::string &path)
+{
+  return path.size() > 7 && strcasecmp(path.c_str() + path.size() - 7, ".acgame") == 0;
+}
+
+// PS5SX2x6: set when the game started is an arcade one; player 1's DualSense then goes to the JVS board, not the PS2 pad
+// (a System 246/256 has no controller in its ports).
+static std::atomic<bool> g_orbis_arcade{false};
+
+// PS5SX2x6 (needs proper testing): player 1's DualSense as the cabinet's controls, through pcsx2x6's JVS board (DEV9/ACJV).
+// Every game: Options Start, Cross Button 1 (the test menu's ENTER), the D-pad the JVS lever, touchpad click Service, L3
+// a coin, R3 the Test switch (on/off). L3 and R3 act alone only: held together they stay PS5SX2's combos. Driving games
+// (ACJV's DRIVE mode: Wangan Midnight, Ridge Racer V, ...): the left stick steers, R2 accelerates, L2 brakes, and their
+// layout's shift up, shift down and view (ACJV::GetRacingButtons) are R1, L1 and Triangle. Other games: Square, Triangle,
+// Circle and Cross are Buttons 1, 2, 5 and 4, as pcsx2x6's defaults. Each change is logged ([jvs]), the sticks' once.
+static void orbis_jvs_apply(const OrbisPadData &d)
+{
+  static uint32_t s_prev_buttons = 0;
+  static u16 s_prev_mask = 0;
+  static bool s_logged_mode = false, s_logged_steer = false, s_logged_gas = false, s_logged_brake = false;
+  const uint32_t b = d.buttons;
+  const uint32_t pressed = b & ~s_prev_buttons;
+  const JVS_MODE mode = ACJV::GetMode();
+  const bool drive = mode == JVS_MODE::DRIVE;
+  if (!s_logged_mode)
+  {
+    printf("[jvs] player 1 on the JVS board: mode %d (%s), game %s\n", static_cast<int>(mode), drive ? "driving" : "buttons",
+      ACJV::GetGameId().c_str());
+    fflush(stdout);
+    s_logged_mode = true;
+  }
+
+  u16 mask = 0;
+  if (b & 0x00000008u) mask |= JVS_BTN_START;   // Options
+  if (b & 0x00004000u) mask |= JVS_BTN_1;       // Cross
+  if (b & 0x00100000u) mask |= JVS_BTN_SERVICE; // touchpad click
+  if (b & 0x00000010u) mask |= JVS_BTN_UP;
+  if (b & 0x00000040u) mask |= JVS_BTN_DOWN;
+  if (b & 0x00000080u) mask |= JVS_BTN_LEFT;
+  if (b & 0x00000020u) mask |= JVS_BTN_RIGHT;
+  if (drive)
+  {
+    for (const InputBindingInfo &bi : ACJV::GetRacingButtons())
+    {
+      const std::string_view name(bi.name);
+      const uint32_t bit = name.ends_with("ShiftUp") ? 0x00000800u : name.ends_with("ShiftDown") ? 0x00000400u :
+                           name.ends_with("View") ? 0x00001000u : 0u;
+      if (bit && (b & bit))
+        mask |= static_cast<u16>(bi.bind_index);
+    }
+    const int steer = static_cast<int>(d.lx) - 128;
+    const float dz = 10.0f;
+    const float right = steer > dz ? std::min(1.0f, (steer - dz) / (127.0f - dz)) : 0.0f;
+    const float left = steer < -dz ? std::min(1.0f, (-steer - dz) / (128.0f - dz)) : 0.0f;
+    ACJV::SetWheelAxis(0, right);
+    ACJV::SetWheelAxis(1, left);
+    ACJV::SetWheelAxis(2, d.r2 / 255.0f);
+    ACJV::SetWheelAxis(3, d.l2 / 255.0f);
+    if (!s_logged_steer && (right > 0.5f || left > 0.5f))
+    {
+      printf("[jvs] steering: %s (left stick x %u)\n", right > 0.5f ? "right" : "left", d.lx);
+      s_logged_steer = true;
+    }
+    if (!s_logged_gas && d.r2 > 128)
+    {
+      printf("[jvs] accelerator: R2 %u\n", d.r2);
+      s_logged_gas = true;
+    }
+    if (!s_logged_brake && d.l2 > 128)
+    {
+      printf("[jvs] brake: L2 %u\n", d.l2);
+      s_logged_brake = true;
+    }
+  }
+  else
+  {
+    if (b & 0x00008000u) mask |= JVS_BTN_1; // Square
+    if (b & 0x00001000u) mask |= JVS_BTN_2; // Triangle
+    if (b & 0x00002000u) mask |= JVS_BTN_5; // Circle
+    if (b & 0x00004000u) mask |= JVS_BTN_4; // Cross
+  }
+  if (const u16 up = s_prev_mask & ~mask)
+    ACJV::SetButtonState(0, up, false);
+  if (const u16 down = mask & ~s_prev_mask)
+  {
+    ACJV::SetButtonState(0, down, true);
+    printf("[jvs] pressed: mask %04x (buttons %08x)\n", down, b);
+  }
+  s_prev_mask = mask;
+
+  const bool l3 = (b & 0x2u) != 0, r3 = (b & 0x4u) != 0;
+  if ((pressed & 0x2u) && !r3)
+  {
+    ACJV::InsertCoin(0);
+    printf("[jvs] coin (L3): %d credit(s) inserted on slot 1 so far\n", static_cast<int>(ACJV::coin[0]));
+  }
+  if ((pressed & 0x4u) && !l3)
+  {
+    ACJV::ToggleDIPSwitchState(0);
+    printf("[jvs] test switch (R3): %s\n", ACJV::GetDIPSwitchState(0) ? "on" : "off");
+  }
+  if (pressed)
+    fflush(stdout);
+  s_prev_buttons = b;
+}
+
 static void orbis_rumble_send(int index, int32_t handle, OrbisRumbleOut &out)
 {
   if (handle < 0)
@@ -1119,7 +1227,9 @@ static void *orbis_pad_thread(void *)
         if (s_click_consumed)
           d.buttons &= ~0x00100000u;
       }
-      if (g_orbis_port1_guitar.load(std::memory_order_relaxed))
+      if (g_orbis_arcade.load(std::memory_order_relaxed))
+        orbis_jvs_apply(d); // PS5SX2x6: the arcade game's JVS board
+      else if (g_orbis_port1_guitar.load(std::memory_order_relaxed))
         orbis_pad_apply_guitar(port1, d, have_usb ? &usb_now : nullptr); // vk-285-140
       else
         orbis_pad_apply(port1, d);
@@ -4220,7 +4330,8 @@ int main()
     orbis_apply_gs_ini(peek, true);
     const bool on = peek.GetBoolValue("PS5SX2", "BiosByRegion", true);
     const bool disc_game = !s_game_path.empty() &&
-      !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0);
+      !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0) &&
+      !orbis_is_acgame(s_game_path); // PS5SX2x6: nor is an arcade game's manifest
     const std::string serial = disc_game ? fe::ReadSerial(s_game_path) : std::string();
     // the BIOS region (BiosTools' numbering: 0 Japan, 1 USA, 2 Europe, 4 Asia, 6 China) a serial's prefix asks for
     int want = -1;
@@ -4306,7 +4417,8 @@ int main()
     orbis_apply_gs_ini(peek, true);
     const bool on = peek.GetBoolValue("PS5SX2", "GameTuning", true);
     const bool disc_game = !s_game_path.empty() &&
-      !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0);
+      !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0) &&
+      !orbis_is_acgame(s_game_path); // PS5SX2x6: nor is an arcade game's manifest
     const std::string serial = disc_game ? fe::ReadSerial(s_game_path) : std::string();
     static const char* const rac1[] = {"SCUS-97199", "SCES-50916", "SCAJ-20001", "SCPS-15037",  // the releases
                                        "SCED-50916", "SCED-51075", "SCUS-97209", "SCUS-97240"}; // their demos
@@ -4525,7 +4637,8 @@ int main()
   VMBootParameters params;
   params.filename = s_game_path; // vk-285-30
   // vk-285-139: a game's discs (and the cheat disc as disc 1 when the game starts from it).
-  if (!s_game_path.empty() && !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0))
+  if (!s_game_path.empty() && !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0) &&
+      !orbis_is_acgame(s_game_path))
   {
     params.filename = orbis_disc_boot(s_game_path);
     // PR #34: a disc drive plays from the disc itself, through PCSX2's disc reader (orbis-shims/OrbisIOCtlSrc.cpp).
@@ -4560,6 +4673,16 @@ int main()
       params.source_type = CDVD_SourceType::NoDisc;
     }
     printf("[boot] ELF %s, %s\n", s_game_path.c_str(), disc.empty() ? "no disc (PS5SX2/ElfDisc not set or not found)" : ("disc " + disc).c_str());
+    fflush(stdout);
+  }
+
+  // PS5SX2x6: an arcade game's .acgame goes to VMManager as it is (pcsx2x6's isArcadeManifest: the arcade BIOS, the dongle in
+  // memcards/, the media image and the boot ELF in its folder), and player 1's DualSense to the JVS board.
+  if (orbis_is_acgame(s_game_path))
+  {
+    params.filename = s_game_path;
+    g_orbis_arcade.store(true, std::memory_order_relaxed);
+    printf("[boot] arcade game %s (pcsx2x6 .acgame): the DualSense goes to the JVS board\n", s_game_path.c_str());
     fflush(stdout);
   }
 

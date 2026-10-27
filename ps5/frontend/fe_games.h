@@ -39,6 +39,8 @@ struct GameInfo
 bool IsDiscImageName(const char* name);
 // 2026-10-08: an .elf (a PS2 executable). 2.11: ScanGames no longer lists any (they are no disc images: IsDiscImageName is false for one).
 bool IsElfName(const char* name);
+// PS5SX2x6: a pcsx2x6 arcade game's manifest (.acgame), which IsDiscImageName takes, the only thing it takes in this title.
+bool IsArcadeGameName(const char* name);
 
 // Lists the disc images in `dirs` (the first folder wins for a name found twice), sorted by title. Each folder's own folders are
 // opened too, one level down; PS5SX2/ScanSubfolders off (`subfolders` false): only the files directly in each folder.

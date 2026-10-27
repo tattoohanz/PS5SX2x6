@@ -37,6 +37,38 @@ bool HasExtension(const char* name, const char* ext)
 	return true;
 }
 
+// PS5SX2x6: `key=` in a pcsx2x6 .acgame's sections ([game] name, gameid), the first one; empty without it.
+std::string AcgameValue(const std::string& path, const char* key)
+{
+	FILE* f = std::fopen(path.c_str(), "r");
+	if (!f)
+		return {};
+	char line[512];
+	std::string value;
+	const size_t k = std::strlen(key);
+	while (value.empty() && std::fgets(line, sizeof(line), f))
+	{
+		const char* p = line;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (std::strncmp(p, key, k) != 0)
+			continue;
+		p += k;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p != '=')
+			continue;
+		p++;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		value = p;
+		while (!value.empty() && (value.back() == '\n' || value.back() == '\r' || value.back() == ' ' || value.back() == '\t'))
+			value.pop_back();
+	}
+	std::fclose(f);
+	return value;
+}
+
 std::string Lower(std::string s)
 {
 	for (char& c : s)
@@ -592,10 +624,14 @@ std::string DescribeImage(const std::string& image_path)
 
 bool IsDiscImageName(const char* name)
 {
-	// 2026-10-08: .bin and .img too (raw CD images or plain ISOs under another name; PCSX2 reads both, VMManager.cpp's list).
-	// 2.11: no .elf any more (testers: PS5 payloads and PS2 executables lying in a games folder cluttered the shelf).
-	return HasExtension(name, ".iso") || HasExtension(name, ".chd") || HasExtension(name, ".cso") || HasExtension(name, ".zso") ||
-		   HasExtension(name, ".bin") || HasExtension(name, ".img");
+	// PS5SX2x6: the shelf lists the arcade games, by their pcsx2x6 .acgame. Their media images (a .chd in the game's folder) and
+	// PS2 discs are not listed: this title runs the arcade boards only.
+	return IsArcadeGameName(name);
+}
+
+bool IsArcadeGameName(const char* name)
+{
+	return HasExtension(name, ".acgame");
 }
 
 bool IsElfName(const char* name)
@@ -615,13 +651,16 @@ void SetSerialCacheFile(const std::string& path)
 
 std::string ReadSerial(const std::string& image_path)
 {
+	// PS5SX2x6: an arcade game's ID (NM00008), from its .acgame.
+	if (IsArcadeGameName(image_path.c_str()))
+		return AcgameValue(image_path, "gameid");
 	// 2.02: every format through the serial cache (was the compressed ones only, vk-285-108/113).
 	return KeyedSerial(image_path, SerialKey(image_path));
 }
 
 std::string ReadSerial(const GameInfo& g)
 {
-	if (g.mtime == 0)
+	if (g.mtime == 0 || IsArcadeGameName(g.path.c_str()))
 		return ReadSerial(g.path);
 	return KeyedSerial(g.path, MakeSerialKey(g.path, static_cast<long long>(g.bytes), static_cast<long long>(g.mtime)));
 }
@@ -1100,6 +1139,17 @@ void ScanDir(const std::string& dir, std::vector<GameInfo>& games, std::vector<s
 		g.bytes = static_cast<uint64_t>(st.st_size);
 		g.mtime = static_cast<int64_t>(st.st_mtime); // 2.02: the serial cache's key (ReadSerial(const GameInfo&))
 		MakeTitle(g.stem, g.title, g.region, g.extra);
+		if (IsArcadeGameName(file.c_str()))
+		{
+			// PS5SX2x6: an arcade game, by its .acgame's name and ID ("Wangan Midnight", NM00008).
+			g.stem = file.substr(0, file.size() - 7);
+			g.serial = AcgameValue(g.path, "gameid");
+			g.title = AcgameValue(g.path, "name");
+			if (g.title.empty())
+				g.title = g.serial.empty() ? g.stem : g.serial;
+			g.region.clear();
+			g.extra.clear();
+		}
 		games.push_back(g);
 	}
 	closedir(d);

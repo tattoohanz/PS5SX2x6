@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "OrbisPaths.h"
+#include "OrbisDataDir.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -17,7 +18,7 @@
 
 namespace
 {
-constexpr const char* kRoot = "/data/PCSX2";
+constexpr const char* kRoot = ORBIS_DATA_DIR;
 
 bool IsDir(const std::string& path)
 {
@@ -232,7 +233,7 @@ extern "C" bool ps5vk_live_flag_hook(const char* path, bool* on)
 }
 
 extern "C" {
-char g_orbis_pf_log[160] = "/data/PCSX2/pf.log";
+char g_orbis_pf_log[160] = ORBIS_DATA_DIR "/pf.log";
 }
 
 std::string OrbisLogPath(const char* name)

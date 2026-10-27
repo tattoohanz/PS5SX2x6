@@ -1,5 +1,6 @@
 // pcsx2-orbis boot smoke: VMManager init + Execute on worker + pc sampling.
 #include <atomic>
+#include "OrbisDataDir.h"
 #include <memory> // 2.02: orbis_probe_game_read
 #include <cstdarg>
 #include <vector>
@@ -248,7 +249,7 @@ static void orbis_boot_log_release(const char* when)
   if (!g_boot_held.load(std::memory_order_acquire))
     return;
   struct stat st = {};
-  if (stat("/data/PCSX2", &st) != 0 || !S_ISDIR(st.st_mode))
+  if (stat(ORBIS_DATA_DIR, &st) != 0 || !S_ISDIR(st.st_mode))
     return; // still not there
   OrbisBootLogHold* h = g_boot_hold;
   fflush(stdout);
@@ -1260,7 +1261,7 @@ static void orbis_apply_ini_file(MemorySettingsInterface& si, const char* path, 
 
 static void orbis_apply_gs_ini(MemorySettingsInterface& si, bool quiet = false)
 {
-  orbis_apply_ini_file(si, "/data/PCSX2/gs.ini", "gs.ini", quiet);
+  orbis_apply_ini_file(si, ORBIS_DATA_DIR "/gs.ini", "gs.ini", quiet);
   if (!s_game_ini_path.empty()) // vk-285-32: then the game's own
     orbis_apply_ini_file(si, s_game_ini_path.c_str(), "game ini", quiet);
 #ifdef PS5SX2_ACHIEVEMENTS
@@ -1492,7 +1493,7 @@ static void orbis_set_bezel(bool on, const std::string& dir)
   }
   g_orbis_bezel_gen.fetch_add(1, std::memory_order_release);
   printf("[boot] overlay picture %s (PS5SX2/Bezel), from %s\n", on ? "on" : "off",
-    dir.empty() ? "/data/PCSX2/overlays" : (dir + ", then /data/PCSX2/overlays (PS5SX2/BezelDir)").c_str());
+    dir.empty() ? ORBIS_DATA_DIR "/overlays" : (dir + ", then /data/PCSX2/overlays (PS5SX2/BezelDir)").c_str());
   fflush(stdout);
 }
 
@@ -2302,7 +2303,7 @@ static bool orbis_leave_start_relay(const OrbisLeaveFlags& fl)
     return false;
   // The title the system will close: this tile's (its folder's name), the main app's, or unknown (a tile whose folder was not found: the payload then
   // goes by the id of the running big app).
-  std::string closing = "PPSA99203";
+  std::string closing = ORBIS_TITLE_ID;
   const std::string tile = orbis_own_tile_dir();
   if (!tile.empty())
     closing = tile.substr(tile.find_last_of('/') + 1);
@@ -2311,7 +2312,7 @@ static bool orbis_leave_start_relay(const OrbisLeaveFlags& fl)
   std::string why;
   OrbisRelaunchTiming timing;
   timing.settle_ms = fl.settle_ms;
-  const bool ok = OrbisRelaunchStart(closing.c_str(), "PPSA99203", static_cast<int>(getpid()), why, timing);
+  const bool ok = OrbisRelaunchStart(closing.c_str(), ORBIS_TITLE_ID, static_cast<int>(getpid()), why, timing);
   printf("[menu] relaunch payload (closing title '%s', settle %d ms, not before %d ms after the process exit, retry %d ms): %s\n", closing.c_str(), timing.settle_ms,
     timing.min_exit_ms, timing.retry_ms, ok ? "up" : why.c_str());
   fflush(stdout);
@@ -2471,7 +2472,7 @@ bool g_orbis_scan_usb = true;
 static std::string orbis_gs_ini_string(const char* key)
 {
   MemorySettingsInterface peek;
-  orbis_apply_ini_file(peek, "/data/PCSX2/gs.ini", "gs.ini", true);
+  orbis_apply_ini_file(peek, ORBIS_DATA_DIR "/gs.ini", "gs.ini", true);
   std::string value;
   peek.GetStringValue("PS5SX2", key, &value);
   return value;
@@ -2540,7 +2541,7 @@ static void orbis_scan_usb(const char* when)
   std::vector<std::string> defaults, drives;
   if (set.empty())
   {
-    defaults = {OrbisDir("games"), "/data/PCSX2"};
+    defaults = {OrbisDir("games"), ORBIS_DATA_DIR};
     if (options.scan_usb)
       drives = orbis_usb_game_dirs(when);
     else
@@ -2595,8 +2596,8 @@ static std::vector<std::string> orbis_bios_places()
   std::vector<std::string> dirs = {EmuFolders::Bios};
   if (g_orbis_bios_only) // 2026-10-16: the BIOS folder the player set is the only place (PS5SX2/BiosFolder)
     return dirs;
-  if (EmuFolders::Bios != "/data/PCSX2")
-    dirs.push_back("/data/PCSX2");
+  if (EmuFolders::Bios != ORBIS_DATA_DIR)
+    dirs.push_back(ORBIS_DATA_DIR);
   for (int i = 0; i < 10 && g_orbis_scan_usb; i++) // 2026-10-16: PS5SX2/ScanUsb off: no drive
   {
     const std::string root = i < 8 ? "/mnt/usb" + std::to_string(i) : "/mnt/ext" + std::to_string(i - 8);
@@ -2626,7 +2627,7 @@ static bool orbis_check_bios()
       return true;
     }
   }
-  s_bios_problem = fe::DescribeBiosProblem(EmuFolders::Bios, "/data/PCSX2", orbis_bios_places(), orbis_is_bios);
+  s_bios_problem = fe::DescribeBiosProblem(EmuFolders::Bios, ORBIS_DATA_DIR, orbis_bios_places(), orbis_is_bios);
   printf("[bios] no PS2 BIOS: %s\n", s_bios_problem.c_str());
   fflush(stdout);
   return false;
@@ -2637,7 +2638,7 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   OrbisFrontendPaths fe;
   // vk-285-134: the BIOS, for the shelf's line and its check at each start.
   fe.bios_check = []() { return orbis_check_bios(); };
-  fe.bios_dir = EmuFolders::Bios == "/data/PCSX2" ? "/data/PCSX2/bios" : EmuFolders::Bios;
+  fe.bios_dir = EmuFolders::Bios == ORBIS_DATA_DIR ? ORBIS_DATA_DIR "/bios" : EmuFolders::Bios;
   fe.bios_problem = [](){ return s_bios_problem; };
   // Test build 1 (vk-285-55): USB drives, the testing label and the logs download.
   // 2026-10-16: the folders games are listed from, all of them (fe_roots.h; was usb_dirs after games/ and /data/PCSX2).
@@ -2658,9 +2659,9 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   fe.logs_dir = OrbisDir("logs");
   fe.report_header = orbis_report_header();
   fe.games_dir = OrbisDir("games");
-  fe.top_dir = "/data/PCSX2";
-  fe.settings_dir = "/data/PCSX2/settings";
-  fe.gs_ini = "/data/PCSX2/gs.ini";
+  fe.top_dir = ORBIS_DATA_DIR;
+  fe.settings_dir = ORBIS_DATA_DIR "/settings";
+  fe.gs_ini = ORBIS_DATA_DIR "/gs.ini";
   fe.patches_dir = OrbisDir("patches");
   fe.covers_dir = OrbisDir("covers");
   fe.cache_dir = OrbisDir("cache") + "/covers";
@@ -2673,7 +2674,7 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   // the folder when it first needs it.
   // 2026-10-16: or the folder the player set (PS5SX2/TexturesDir: EmuFolders::Textures, set at start). The prefetch before the
   // jailbreak runs earlier than that assignment: it gets the usual folder (it doesn't use it).
-  fe.textures_dir = EmuFolders::Textures.empty() ? std::string("/data/PCSX2/textures") : EmuFolders::Textures;
+  fe.textures_dir = EmuFolders::Textures.empty() ? std::string(ORBIS_DATA_DIR "/textures") : EmuFolders::Textures;
   fe.texture_pack_list = OrbisDir("cache") + "/texture-packs.json";
   fe.texture_packs = !orbis_flag("notexpacks");
   // 2026-10-08 (AI-assisted): a game's patches and cheats from GitHub (the sheet's "Get patches and cheats"), into the
@@ -2717,7 +2718,7 @@ static std::string orbis_find_image(const std::string& want, const char* what)
   // the NFS shares); one folder down in each unless PS5SX2/ScanSubfolders is off.
   std::vector<std::string> dirs = s_roots.dirs;
   if (dirs.empty() && !s_roots.only_set) // not looked up yet (orbis_scan_usb): the usual two
-    dirs = {OrbisDir("games"), "/data/PCSX2"};
+    dirs = {OrbisDir("games"), ORBIS_DATA_DIR};
   for (const std::string& dir : dirs)
   {
     if (is_file(dir + "/" + want))
@@ -2855,14 +2856,14 @@ static std::string orbis_disc_boot(const std::string& game)
   std::vector<std::string> set = OrbisDiscDrive::IsDrivePath(game) ? std::vector<std::string>{game} : fe::DiscSet(game);
   std::string start = game;
   MemorySettingsInterface peek;
-  orbis_apply_ini_file(peek, "/data/PCSX2/gs.ini", "gs.ini", true);
+  orbis_apply_ini_file(peek, ORBIS_DATA_DIR "/gs.ini", "gs.ini", true);
   if (!s_game_ini_path.empty())
     orbis_apply_ini_file(peek, s_game_ini_path.c_str(), "game ini", true);
   std::string on, want;
   if (peek.GetStringValue("PS5SX2", "CheatDiscStart", &on) && (on == "true" || on == "1"))
   {
     MemorySettingsInterface global;
-    orbis_apply_ini_file(global, "/data/PCSX2/gs.ini", "gs.ini", true);
+    orbis_apply_ini_file(global, ORBIS_DATA_DIR "/gs.ini", "gs.ini", true);
     if (!global.GetStringValue("PS5SX2", "CheatDisc", &want) || want.empty())
       printf("[disc] Start from the cheat disc is on, but no cheat disc is set (Cheat disc, the sheet for all games)\n");
     else
@@ -2898,9 +2899,9 @@ static std::string orbis_disc_boot(const std::string& game)
 static void orbis_log_flag_access(const char* when)
 {
   struct stat st{};
-  const int rc = stat("/data/PCSX2/flags", &st);
+  const int rc = stat(ORBIS_DATA_DIR "/flags", &st);
   const int stat_errno = rc ? errno : 0;
-  const int acc = access("/data/PCSX2/flags", R_OK | X_OK);
+  const int acc = access(ORBIS_DATA_DIR "/flags", R_OK | X_OK);
   const int acc_errno = acc ? errno : 0;
   printf("[boot] flags folder %s: stat rc=%d errno=%d mode=%o uid=%u, access rc=%d errno=%d\n", when, rc,
          stat_errno, rc ? 0u : (unsigned)(st.st_mode & 07777), rc ? 0u : (unsigned)st.st_uid, acc, acc_errno);
@@ -2923,7 +2924,7 @@ static const char* const kOrbisReleaseFlags[] = {"fastmem", "jitdirect", "sw_ren
 
 static void orbis_ensure_data_layout()
 {
-  static const char kRoot[] = "/data/PCSX2";
+  static const char kRoot[] = ORBIS_DATA_DIR;
   struct stat st{};
   if (stat(kRoot, &st) != 0 || !S_ISDIR(st.st_mode))
   {
@@ -3390,7 +3391,7 @@ int main()
   }
   fflush(stdout);
   {
-    FILE* f = fopen("/data/PCSX2/pid.txt", "w");
+    FILE* f = fopen(ORBIS_DATA_DIR "/pid.txt", "w");
     if (f) { fprintf(f, "%d", (int)getpid()); fclose(f); }
     char line[32];
     snprintf(line, sizeof(line), "[boot] pid=%d", (int)getpid());
@@ -3472,7 +3473,7 @@ int main()
   if (tile_drive == "reload")
   {
     printf("[boot] reload tile: leaving a note for the disc payload and closing\n");
-    if (FILE* rf = fopen("/data/PCSX2/reload.req", "w"))
+    if (FILE* rf = fopen(ORBIS_DATA_DIR "/reload.req", "w"))
     {
       fprintf(rf, "%lld\n", (long long)time(nullptr));
       fclose(rf);
@@ -3630,8 +3631,8 @@ int main()
     }).detach();
   }
   ps5::debug::set_line(2, "setting up folders...");
-  EmuFolders::AppRoot = "/data/PCSX2";
-  EmuFolders::DataRoot = "/data/PCSX2";
+  EmuFolders::AppRoot = ORBIS_DATA_DIR;
+  EmuFolders::DataRoot = ORBIS_DATA_DIR;
   // vk-285-33: sub-folders when they exist, else the top folder as before (OrbisPaths.h).
   EmuFolders::Bios = OrbisDir("bios");
   g_orbis_scan_usb = orbis_gs_ini_bool("ScanUsb", true); // 2026-10-16: off: the drives are not looked through for a BIOS either
@@ -3669,7 +3670,7 @@ int main()
       fflush(stdout);
     }
   }
-  EmuFolders::Settings = "/data/PCSX2";
+  EmuFolders::Settings = ORBIS_DATA_DIR;
   EmuFolders::Logs = OrbisDir("logs");
   EmuFolders::MemoryCards = OrbisDir("memcards");
   EmuFolders::Snapshots = OrbisDir("snapshots");
@@ -3678,8 +3679,8 @@ int main()
   EmuFolders::Patches = OrbisDir("patches");
   EmuFolders::Cache = OrbisDir("cache");
   EmuFolders::Covers = OrbisDir("covers");
-  EmuFolders::GameSettings = "/data/PCSX2";
-  EmuFolders::Textures = "/data/PCSX2/textures"; // vk-285-12: packs in textures/<serial>/replacements (HW renderer only)
+  EmuFolders::GameSettings = ORBIS_DATA_DIR;
+  EmuFolders::Textures = ORBIS_DATA_DIR "/textures"; // vk-285-12: packs in textures/<serial>/replacements (HW renderer only)
   {
     // 2026-10-16 (swordpdf: the texture replacements folder should be the one you set, the default the one we have): PS5SX2/TexturesDir
     // (gs.ini only, the Folders group), a full path, is the textures folder: PCSX2 reads its packs from it, the sheet's HD texture pack
@@ -3705,7 +3706,7 @@ int main()
       fflush(stdout);
     }
   }
-  EmuFolders::InputProfiles = "/data/PCSX2";
+  EmuFolders::InputProfiles = ORBIS_DATA_DIR;
   // Orbis: GL renderer loads shaders from <Resources>/shaders/opengl/*.glsl.
   EmuFolders::Resources = OrbisDir("resources"); // vk-285-33: GameIndex.yaml, shaders/
   printf("[boot] folders: bios %s | memcards %s | savestates %s | patches %s | resources %s | cache %s | logs %s | flags %s\n",
@@ -3731,7 +3732,7 @@ int main()
   // vk-285-40: after the driver's environment above, because the frontend runs on the same driver.
   extern std::string orbis_select_game(const char* games_dir, const char* top_dir, const char* build_tag);
 #ifdef PS5SX2_ACHIEVEMENTS
-  OrbisAchievementsInit(s_base_si, "/data/PCSX2");
+  OrbisAchievementsInit(s_base_si, ORBIS_DATA_DIR);
 #endif
   ps5::debug::set_line(2, "game selector...");
 #ifdef ORBIS_VULKAN
@@ -3992,10 +3993,10 @@ int main()
     if (s_roots.only_set)
     {
       extern std::string orbis_select_game_dirs(const std::vector<std::string>& dirs, const char* top_dir, const char* build_tag);
-      s_game_path = orbis_select_game_dirs(s_roots.dirs, "/data/PCSX2", ORBIS_BUILD_TAG);
+      s_game_path = orbis_select_game_dirs(s_roots.dirs, ORBIS_DATA_DIR, ORBIS_BUILD_TAG);
     }
     else
-      s_game_path = orbis_select_game(OrbisDir("games").c_str(), "/data/PCSX2", ORBIS_BUILD_TAG); // vk-285-33: games/ too
+      s_game_path = orbis_select_game(OrbisDir("games").c_str(), ORBIS_DATA_DIR, ORBIS_BUILD_TAG); // vk-285-33: games/ too
   }
   if (s_game_path.empty())
   {
@@ -4021,7 +4022,7 @@ int main()
     s_game_path.clear();
     s_game_ini_path.clear();
     printf("[boot] the PS2 system menu (no disc); settings: gs.ini only\n");
-    orbis_eventf("game start: the PS2 system menu (no disc) | all games (gs.ini): %s", orbis_ini_summary("/data/PCSX2/gs.ini").c_str());
+    orbis_eventf("game start: the PS2 system menu (no disc) | all games (gs.ini): %s", orbis_ini_summary(ORBIS_DATA_DIR "/gs.ini").c_str());
     fflush(stdout);
   }
   else
@@ -4045,8 +4046,8 @@ int main()
       if (safe)
       {
         const std::string by_copy = OrbisDiscSettingsStem(serial);
-        const bool old_file = access(("/data/PCSX2/settings/" + serial + ".ini").c_str(), F_OK) == 0;
-        const bool new_file = access(("/data/PCSX2/settings/" + by_copy + ".ini").c_str(), F_OK) == 0;
+        const bool old_file = access((ORBIS_DATA_DIR "/settings/" + serial + ".ini").c_str(), F_OK) == 0;
+        const bool new_file = access((ORBIS_DATA_DIR "/settings/" + by_copy + ".ini").c_str(), F_OK) == 0;
         stem = old_file && !new_file ? serial : by_copy;
         web_serial = serial;
       }
@@ -4056,7 +4057,7 @@ int main()
         safe ? serial.c_str() : serial.empty() ? "no serial read" : "a serial unfit for a file name (not used)", stem.c_str());
     }
     web_stem = stem;
-    s_game_ini_path = "/data/PCSX2/settings/" + stem + ".ini";
+    s_game_ini_path = ORBIS_DATA_DIR "/settings/" + stem + ".ini";
   }
 #ifdef ORBIS_VULKAN
   if (!system_menu)
@@ -4072,7 +4073,7 @@ int main()
     const std::string from = dir == OrbisDir("games") ? std::string() : " (from " + dir + ")";
     orbis_eventf("game start: %s%s | its settings: %s | all games (gs.ini): %s", // vk-285-51
       s_game_path.substr(s_game_path.rfind('/') + 1).c_str(), from.c_str(), orbis_ini_summary(s_game_ini_path).c_str(),
-      orbis_ini_summary("/data/PCSX2/gs.ini").c_str());
+      orbis_ini_summary(ORBIS_DATA_DIR "/gs.ini").c_str());
   }
   // 2026-10-05 (AI-assisted): rich toasts (RetroAchievements' login and game summary) wait for the game's first 12 s:
   // sent in its first seconds, they showed without their pictures (orbis-shims/ProsperoNotify.cpp, the pacing).
@@ -4472,7 +4473,7 @@ int main()
     // played from the disc drive whose settings file is not the one the shelf wrote, and a software-renderer game.
     {
       MemorySettingsInterface gs_only, game_only;
-      orbis_apply_ini_file(gs_only, "/data/PCSX2/gs.ini", "gs.ini", true);
+      orbis_apply_ini_file(gs_only, ORBIS_DATA_DIR "/gs.ini", "gs.ini", true);
       if (!s_game_ini_path.empty())
         orbis_apply_ini_file(game_only, s_game_ini_path.c_str(), "game ini", true);
       const bool in_game = game_only.ContainsValue("PS5SX2", "FrameGeneration");
@@ -4610,7 +4611,7 @@ int main()
     printf("[boot] BIOS dir scan:\n");
     fflush(stdout);
     {
-      DIR* d = opendir("/data/PCSX2");
+      DIR* d = opendir(ORBIS_DATA_DIR);
       printf("[boot]   opendir(/data/PCSX2)=%p errno=%d\n", (void*)d, errno);
       if (d)
       {
@@ -4632,7 +4633,7 @@ int main()
       fflush(stdout);
     }
     FileSystem::FindResultsArray results;
-    if (FileSystem::FindFiles("/data/PCSX2", "*", FILESYSTEM_FIND_FILES, &results))
+    if (FileSystem::FindFiles(ORBIS_DATA_DIR, "*", FILESYSTEM_FIND_FILES, &results))
     {
       for (const auto& fd : results)
         printf("[boot]   found: %s (%lld bytes)\n", fd.FileName.c_str(), (long long)fd.Size);

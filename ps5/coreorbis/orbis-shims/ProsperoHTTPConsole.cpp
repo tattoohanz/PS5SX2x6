@@ -9,6 +9,7 @@
 // (PEM, read when a downloader is made). Certificate checks are never turned off.
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ProsperoHTTPDownloader.h"
+#include "OrbisDataDir.h"
 
 #include "ps5/frontend/fe_https.h"
 
@@ -24,7 +25,7 @@ int sceNetPoolDestroy(int);
 
 namespace
 {
-	constexpr const char* kExtraRoots = "/data/PCSX2/retroachievements-roots.pem";
+	constexpr const char* kExtraRoots = ORBIS_DATA_DIR "/retroachievements-roots.pem";
 	constexpr size_t kMaxAnswer = 16 * 1024 * 1024;
 
 	void Log(const std::string& line)

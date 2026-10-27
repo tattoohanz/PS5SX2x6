@@ -7,9 +7,9 @@
   "attribute": 0,
   "attribute2": 0,
   "attribute3": 524352,
-  "conceptId": "99203",
+  "conceptId": "97376",
   "contentBadgeType": 1,
-  "contentId": "UP9000-PPSA99203_00-PCSX2ORBIS00001",
+  "contentId": "UP9000-PPSA97376_00-PCSX2X6ARCADE001",
   "contentVersion": "02.150.000",
   "downloadDataSize": 256,
   "gameIntent": {
@@ -22,7 +22,7 @@
   "localizedParameters": {
     "defaultLanguage": "en-US",
     "en-US": {
-      "titleName": "PS5SX2"
+      "titleName": "PS5SX2x6"
     }
   },
   "masterVersion": "02.15",
@@ -33,6 +33,6 @@
   },
   "requiredSystemSoftwareVersion": "0x0000000000000000",
   "sdkVersion": "0x0000000000000000",
-  "titleId": "PPSA99203",
+  "titleId": "PPSA97376",
   "versionFileUri": ""
 }

@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_app.h"
+#include "OrbisDataDir.h"
 #include "fe_i18n.h"
 #include "fe_roots.h" // 2026-10-16: kScanSubfoldersKey (the picker's game count)
 
@@ -1545,7 +1546,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 				// 2026-10-16: with games folders set, the empty shelf names the first of them, not /data/PCSX2/games (a language file
 				// without that path in its line is shown as it is)
 				std::string none = Tr(Str::NoGames);
-				static const char kDefaultPath[] = "/data/PCSX2/games";
+				static const char kDefaultPath[] = ORBIS_DATA_DIR "/games";
 				const size_t at = m_cfg.games_folder_note.empty() ? std::string::npos : none.find(kDefaultPath);
 				if (at != std::string::npos)
 				{

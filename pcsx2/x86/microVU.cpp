@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "microVU.h"
+#include "OrbisDataDir.h"
 
 #include "common/AlignedMalloc.h"
 #include "common/Perf.h"
@@ -605,7 +606,7 @@ void OrbisVU1Dump()
 	const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
 	char path[96];
-	std::snprintf(path, sizeof(path), "/data/PCSX2/logs/vu1dump-%d.bin", n);
+	std::snprintf(path, sizeof(path), ORBIS_DATA_DIR "/logs/vu1dump-%d.bin", n);
 	printf("[vudump] %d: %u programs, %u blocks, code %p + %#llx, %zu bytes, built in %.1f ms on the MTVU thread -> %s\n", n,
 		nprog, nblocks, static_cast<const void*>(base), static_cast<unsigned long long>(used), out.size(), ms, path);
 	fflush(stdout);

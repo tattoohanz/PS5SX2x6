@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_options.h"
+#include "OrbisDataDir.h"
 #include "fe_roots.h" // 2026-10-16: the Folders switches' keys (kScanUsbKey, kScanSubfoldersKey)
 #include "fe_text.h" // vk-285-116: the buttons' symbols (icon::)
 
@@ -456,7 +457,7 @@ const std::vector<OptionGroup>& OptionGroups()
 				// 2026-10-08 (AI-assisted): GSRenderer.cpp OrbisDrawBezel; the folder is on the settings page (no keyboard here).
 				Toggle("PS5SX2/Bezel", "Overlay picture", "false", "Overlay %",
 					"A bezel or frame drawn over the screen around the game: overlays/<game serial>.png, else overlays/default.png, in "
-					"/data/PCSX2 (or the folder named on the settings page): a 1920x1080 PNG with a see-through middle."),
+					ORBIS_DATA_DIR " (or the folder named on the settings page): a 1920x1080 PNG with a see-through middle."),
 				// 2026-10-08 (AI-assisted): GSRenderer.cpp OrbisDrawChallengeIcons.
 				Toggle("PS5SX2/RAChallengeIcons", "Challenge icons", "true", "Challenge icons %",
 					"RetroAchievements: the badge of each challenge going on (an achievement that unlocks if you keep it up, such as "

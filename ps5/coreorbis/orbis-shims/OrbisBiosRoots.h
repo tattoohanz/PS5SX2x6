@@ -14,6 +14,7 @@
 #pragma once
 
 #include <algorithm>
+#include "OrbisDataDir.h"
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,7 +48,7 @@ inline bool IsDir(const std::string& path)
 // `bios`: EmuFolders::Bios. The folders in it (three levels down, 64 at most) are always looked in, in that order; then, unless
 // `only_bios_folder`, /data/PCSX2, its bios folder in another case, and (when `scan_drives`) the drives.
 inline std::vector<std::string> SearchDirs(const std::string& bios, bool only_bios_folder, bool scan_drives = true,
-	const std::string& top = "/data/PCSX2", const std::string& mnt = "/mnt")
+	const std::string& top = ORBIS_DATA_DIR, const std::string& mnt = "/mnt")
 {
 	std::vector<std::string> dirs;
 	// vk-285-134 (AI-assisted): the BIOS folder's folders three levels down (64 at most), not one: build 130's logs had

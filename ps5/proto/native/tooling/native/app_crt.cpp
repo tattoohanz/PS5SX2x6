@@ -8,6 +8,7 @@
  */
 
 #include <cstddef>
+#include "OrbisDataDir.h"
 #include <cstdint>
 #ifdef PS5_INIT_TRACE
 #include <cstdio>
@@ -41,7 +42,7 @@ namespace
 #ifdef PS5_INIT_TRACE
 void trace_initializer(std::size_t index, Initializer initializer)
 {
-    FILE *file = std::fopen("/data/PCSX2/init.log", "a");
+    FILE *file = std::fopen(ORBIS_DATA_DIR "/init.log", "a");
     if (file == nullptr)
         return;
     std::fprintf(file, "before[%zu]=%p\n", index, reinterpret_cast<void *>(initializer));

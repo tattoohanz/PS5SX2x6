@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "ImGui/FullscreenUI.h"
+#include "OrbisDataDir.h"
 #include "OrbisEEDiag.h" // vk-285-100
 #include "ImGui/ImGuiManager.h"
 #include "GS/Renderers/Common/GSRenderer.h"
@@ -955,7 +956,7 @@ static void OrbisLiveTune()
 		std::string g;
 		{
 			std::string b;
-			if (OrbisCachedRead("/data/PCSX2/gs.ini", b))
+			if (OrbisCachedRead(ORBIS_DATA_DIR "/gs.ini", b))
 				g.assign(b, 0, std::min<size_t>(b.size(), 2048));
 		}
 		// vk-285-32: and the game's own settings file (main-boot.cpp), so editing it applies live too.
@@ -998,7 +999,7 @@ static void OrbisLiveTune()
 	const bool reapply = g_orbis_live_reapply.exchange(0, std::memory_order_acq_rel) != 0;
 	{
 		std::string b; // vk-285-105: as the ticker last read it (see gs.ini above)
-		if (OrbisCachedRead("/data/PCSX2/live.ini", b))
+		if (OrbisCachedRead(ORBIS_DATA_DIR "/live.ini", b))
 			cur.assign(b, 0, std::min<size_t>(b.size(), 1024));
 	}
 	// live-9 (AI-assisted): a game's own thread layout (main-boot.cpp's PS5SX2_PIN_LAYOUT, "ee gs vu rec queue" CPUs: R&C1 gets
@@ -1574,7 +1575,7 @@ static void OrbisPrepareBezel()
 			dir.pop_back();
 		if (!dir.empty())
 			dirs.push_back(dir);
-		dirs.push_back("/data/PCSX2/overlays");
+		dirs.push_back(ORBIS_DATA_DIR "/overlays");
 		std::vector<std::string> candidates;
 		for (const std::string& d : dirs)
 		{

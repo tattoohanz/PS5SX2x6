@@ -4,6 +4,7 @@
 // and privilege_io.cpp (PS2-Library-Prototype). Start/step/summary logic
 // unchanged; adds a bounded blocking driver for headless boot.
 #include "ProsperoHenJailbreak.h"
+#include "OrbisDataDir.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -200,7 +201,7 @@ void orbis_log_hen_config()
         buf[total < 0 ? 0 : total] = 0;
         bool has_id = false, has_enabled = false;
         for (ssize_t i = 0; i + 9 <= total; ++i) {
-            if (!__builtin_memcmp(buf + i, "PPSA99203", 9))
+            if (!__builtin_memcmp(buf + i, ORBIS_TITLE_ID, 9))
                 has_id = true;
             if (!__builtin_memcmp(buf + i, "enabled", 7))
                 has_enabled = true;

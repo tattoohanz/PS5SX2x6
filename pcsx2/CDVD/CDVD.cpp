@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "CDVD/CDVD.h"
+#include "OrbisDataDir.h"
 #include "CDVD/Ps1CD.h"
 #include "CDVD/CDVD_internal.h"
 #include "CDVD/IsoReader.h"
@@ -178,7 +179,7 @@ static std::string cdvdGetNVRAMPath()
 // newer of the two is read. The lines "[nvm] ..." in boot.log say what was read, where it was saved and why not.
 static std::string cdvdGetNVRAMFallbackPath()
 {
-	return std::string("/data/PCSX2/nvm/") + std::string(Path::GetFileName(cdvdGetNVRAMPath()));
+	return std::string(ORBIS_DATA_DIR "/nvm/") + std::string(Path::GetFileName(cdvdGetNVRAMPath()));
 }
 
 static time_t cdvdNVRAMFileTime(const std::string& path)
@@ -319,7 +320,7 @@ void cdvdSaveNVRAM()
 	// The file beside the BIOS first (as everywhere); when that fails, /data/PCSX2/nvm (read first at the next start while it is the newer).
 	if (cdvdSaveNVRAMTo(cdvdGetNVRAMPath()))
 		return;
-	::mkdir("/data/PCSX2/nvm", 0777);
+	::mkdir(ORBIS_DATA_DIR "/nvm", 0777);
 	if (cdvdSaveNVRAMTo(cdvdGetNVRAMFallbackPath()))
 		std::printf("[nvm] kept in %s instead\n", cdvdGetNVRAMFallbackPath().c_str());
 	else

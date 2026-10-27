@@ -95,7 +95,7 @@ sh "$NATIVE/tooling/prospero-clang18" \
   -c "$here/main-boot.cpp" -o "$OUT/build/obj/main-boot.o"
 for item in app_crt app_cpp_runtime; do
   sh "$NATIVE/tooling/prospero-clang18" \
-    -std=c++20 -O2 -Wall -Wextra \
+    -std=c++20 -O2 -Wall -Wextra -I"$here/include-orbis" \
     -ffunction-sections -fdata-sections \
     -c "$NATIVE/tooling/native/$item.cpp" -o "$OUT/build/obj/$item.o"
 done

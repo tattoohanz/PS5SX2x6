@@ -8,6 +8,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_ps5.h"
+#include "OrbisDataDir.h"
 
 #include "fe_app.h"
 #include "fe_covers.h"
@@ -2186,7 +2187,7 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 	};
 	// vk-285-135: the places the sheet's folder picker starts from (those that are folders when it opens).
 	// 2026-10-16: and its games folder, the usual place for games, which a games folder set no longer adds to
-	acfg.folder_places = {{"PS5SX2's folder", "/data/PCSX2"}, {"PS5SX2's games folder", "/data/PCSX2/games"}};
+	acfg.folder_places = {{"PS5SX2's folder", ORBIS_DATA_DIR}, {"PS5SX2's games folder", ORBIS_DATA_DIR "/games"}};
 	for (int i = 0; i < 8; i++)
 		acfg.folder_places.push_back({"USB drive " + std::to_string(i + 1), "/mnt/usb" + std::to_string(i)});
 	acfg.folder_places.push_back({"Extended storage", "/mnt/ext0"});

@@ -35,6 +35,37 @@ struct Input
 	// its click: on the shelf the stick turns the picked case over to show its back, the click holds it there.
 	float rx = 0, ry = 0;
 	bool r3 = false;
+	// PS5SX2x6: the D-pad's down alone (not the stick: it opens the Controls page), and the controller as it is, for the
+	// Controls page to light up what is held: its buttons' bits (the PS5's), the sticks and the triggers (0..255).
+	bool dpad_down = false;
+	uint32_t pad_buttons = 0;
+	uint8_t pad_lx = 128, pad_ly = 128, pad_rx = 128, pad_ry = 128, pad_l2 = 0, pad_r2 = 0;
+};
+
+// PS5SX2x6: the Controls page's controls, as the host's table numbers them (orbis-shims/OrbisArcadeControls.h Src).
+namespace pad
+{
+enum : int
+{
+	Cross, Circle, Square, Triangle, L1, R1, L2, R2, L3, R3, Options, Touchpad, Up, Down, Left, Right, DPad, LeftStick, RightStick,
+	Count
+};
+}
+
+// PS5SX2x6: one row of a game's Controls page: the DualSense control (pad::), its name, what it does in the game, and
+// whether it is the cabinet's own (Start, coin, Test, Service, Enter).
+struct ArcadeControlRow
+{
+	int src = 0;
+	std::string src_name;
+	std::string label;
+	bool system = false;
+};
+struct ArcadeControls
+{
+	std::string mode; // "driving", "fighting", ...
+	std::string note; // what isn't there yet, or empty
+	std::vector<ArcadeControlRow> rows;
 };
 
 struct AppConfig
@@ -82,6 +113,10 @@ struct AppConfig
 	// PS5SX2x6: the arcade games' title. No R2 search, no size under the title, no achievements tab on the sheet (the host
 	// leaves the achievements, the texture packs, the online patches, the memory cards and the QR code unset too).
 	bool arcade = false;
+	// PS5SX2x6: a game's Controls page (D-pad down on the shelf), and whether a control is held now (the page lights it up).
+	// Unset: no page.
+	std::function<ArcadeControls(const GameInfo&)> arcade_controls;
+	std::function<bool(int src, const Input&)> arcade_held;
 	// 2.11: the shelf's search, from the settings page on a phone or PC. search_remote gives the text the page set since the last
 	// call (true; "" clears the search); search_report tells the page what the shelf is searching for (it shows it in its box).
 	std::function<bool(std::string& text)> search_remote;
@@ -200,6 +235,11 @@ private:
 	bool SheetMove(int dir); // false at either end
 	void BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent);
 	void RefreshBadges();
+	// PS5SX2x6: the Controls page (D-pad down): the picked game's controls on a drawing of the DualSense.
+	void OpenControls();
+	void LoadControls();
+	void UpdateControls(double dt, const Input& in);
+	void BuildControls(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent);
 	// 2026-10-05: the sheet's HD texture pack row (fe_texpacks.h): its buttons, what it shows, its help line, and the
 	// shelf's line while a pack is on its way.
 	void UpdateTexturePackRow(const Input& in, double now);
@@ -407,6 +447,16 @@ private:
 	bool m_qr_big = false;
 	float m_qr_big_anim = 0.0f;
 	bool m_web_known = false; // SetWebUrl was called (the host preview may never call it)
+
+	// PS5SX2x6: the Controls page: open or not, its fade (0 .. 1), the game it shows and its rows, the right stick's held
+	// direction and repeat, and the controller as it is (what lights up).
+	bool m_ctl_open = false;
+	float m_ctl_anim = 0;
+	int m_ctl_game = -1;
+	ArcadeControls m_ctl;
+	int m_ctl_held = 0;
+	double m_ctl_held_for = 0, m_ctl_next = 0;
+	Input m_ctl_in;
 
 	// vk-285-114: the options sheet: open or not, its slide (0 closed .. 1 open), the focused row, the list's scroll (in
 	// 2160-line pixels), the held-button repeats and the status line's time.

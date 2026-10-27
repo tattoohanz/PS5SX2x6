@@ -996,6 +996,11 @@ void App::Update(double dt, const Input& in)
 		const float a = 1.0f - std::exp(-fdt * 14.0f);
 		m_sheet_scroll += (m_sheet_scroll_target - m_sheet_scroll) * a;
 	}
+	// PS5SX2x6: the Controls page fades in and out.
+	{
+		const float step = fdt / 0.2f;
+		m_ctl_anim = m_ctl_open ? std::min(1.0f, m_ctl_anim + step) : std::max(0.0f, m_ctl_anim - step);
+	}
 
 	if (m_launching)
 	{
@@ -1033,6 +1038,11 @@ void App::Update(double dt, const Input& in)
 	else if (m_sheet_open)
 	{
 		UpdateSheet(dt, in);
+		m_prev = in;
+	}
+	else if (m_ctl_open)
+	{
+		UpdateControls(dt, in); // PS5SX2x6
 		m_prev = in;
 	}
 	else if (m_released && !m_qr_big && m_sheet_anim < 0.05f && m_cfg.achievements.state &&
@@ -1148,6 +1158,13 @@ void App::Update(double dt, const Input& in)
 				m_qr_big = true;
 				Sound(Sfx::Move, 0.3f);
 			}
+			// PS5SX2x6: the D-pad's down (not the stick) opens the picked game's Controls page.
+			else if (m_cfg.arcade_controls && in.dpad_down && !m_prev.dpad_down && !m_games.empty() && m_sheet_anim < 0.05f &&
+			         m_index[static_cast<size_t>(m_selected)] >= 0)
+			{
+				OpenControls();
+				Sound(Sfx::Move, 0.3f);
+			}
 			// vk-285-114: Square opens the selected game's options sheet (the settings for all games when there is no game).
 			else if (!m_qr_big && in.square && !m_prev.square && m_sheet_anim < 0.05f)
 			{
@@ -1179,7 +1196,8 @@ void App::Update(double dt, const Input& in)
 	// with weight that a flick of the thumb cannot spin (swordpdf: "small stick movements make the rotation go fast. make it harder to rotate").
 	{
 		const bool free_shelf = !m_games.empty() && m_index[static_cast<size_t>(m_selected)] >= 0 && !m_launching && !m_sheet_open && m_sheet_anim < 0.05f && !m_account.open &&
-		                        !m_search.typing && !m_ask_on && !m_picker.open && !m_qr_big;
+		                        !m_search.typing && !m_ask_on && !m_picker.open && !m_qr_big &&
+		                        !m_ctl_open && m_ctl_anim < 0.05f; // PS5SX2x6: the right stick changes the Controls page's game
 		float target = 0.0f;
 		m_flip_wanted = false;
 		if (free_shelf)
@@ -1329,6 +1347,8 @@ void App::Build(FrameDesc& f, const std::string& clock)
 	bg.misc[2] = 0.55f;
 	bg.misc[3] = t;
 
+	const float ctl_e = Smoothstep(0.0f, 1.0f, m_ctl_anim); // PS5SX2x6: the Controls page, over dimmed cases
+
 	// The cases, nearest the selection last so the halo lands on top of its neighbours.
 	const int n = static_cast<int>(m_games.size());
 	const int first = std::max(0, static_cast<int>(std::floor(m_scroll)) - kVisible);
@@ -1337,13 +1357,14 @@ void App::Build(FrameDesc& f, const std::string& clock)
 	for (int i = first; i <= last; i++)
 	{
 		const Slot& s = m_slots[static_cast<size_t>(i)];
-		if (!s.set)
+		if (!s.set || ctl_e > 0.9f) // PS5SX2x6: the Controls page covers the shelf
 			continue;
 		const float d = static_cast<float>(i) - m_scroll;
 		BoxDraw b;
 		Pose(d, t, b.model, b.brightness);
 		if (m_games[static_cast<size_t>(i)].hidden) // vk-285-137: shown while Show hidden games is on, dimmed
 			b.brightness *= 0.4f;
+		b.brightness *= 1.0f - 0.85f * ctl_e;
 		b.set = s.set;
 		b.cover_mix = s.cover_mix;
 		b.selected = std::max(0.0f, 1.0f - std::fabs(d) * 2.0f);
@@ -1410,7 +1431,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		f.halo.color[0] = Mix(m_glow[0], 1.0f, 0.8f);
 		f.halo.color[1] = Mix(m_glow[1], 1.0f, 0.8f);
 		f.halo.color[2] = Mix(m_glow[2], 1.0f, 0.8f);
-		f.halo.color[3] = settle * (0.50f + 0.08f * std::sin(t * 2.2f)) * (1.0f - std::min(1.0f, std::fabs(m_flip) * 2.0f)); // 2.11: gone as it turns over
+		f.halo.color[3] = settle * (0.50f + 0.08f * std::sin(t * 2.2f)) * (1.0f - std::min(1.0f, std::fabs(m_flip) * 2.0f)) * (1.0f - ctl_e); // 2.11: gone as it turns over
 	}
 
 	// Fade in at start, out when launching.
@@ -1577,7 +1598,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		m_fonts->AddText(ui, Fit(*m_fonts, m_refused_text, 36.0f * k, W * 0.8f).c_str(), W * 0.5f, H * 0.775f, 36.0f * k,
 			Rgba(1.0f, 0.78f, 0.55f, a), 0.3f, Fonts::Center);
 	}
-	FadeRange(ui, title_begin, ui.size(), 1.0f - sheet_e); // vk-285-114: the sheet shows the title itself
+	FadeRange(ui, title_begin, ui.size(), 1.0f - std::max(sheet_e, ctl_e)); // vk-285-114: the sheet shows the title itself (and the Controls page)
 
 	// vk-285-114: the options sheet, over a dimmed shelf.
 	if (m_sheet_anim > 0.001f)
@@ -1585,6 +1606,15 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		Fonts::AddRoundedRect(ui, 0, 0, W, H, 0.0f, Rgba(0.01f, 0.01f, 0.03f, 0.42f * sheet_e));
 		BuildSheet(ui, W, H, k, accent);
 		f.ui_images = m_achievement_images;
+	}
+
+	// PS5SX2x6: the Controls page, over a dimmed shelf, under the button hints (they are the page's while it is open).
+	if (m_ctl_anim > 0.001f)
+	{
+		const size_t begin = ui.size();
+		Fonts::AddRoundedRect(ui, 0, 0, W, H, 0.0f, Rgba(0.01f, 0.01f, 0.03f, 0.6f));
+		BuildControls(ui, W, H, k, accent);
+		FadeRange(ui, begin, ui.size(), ctl_e);
 	}
 
 	// 2026-10-05: the account panel's dim goes here, under the button hints (they are the panel's while it is open); the
@@ -1679,6 +1709,13 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		hint("#L1", "#R1", "Keys");
 		hint(icon::Circle, nullptr, "Done");
 	}
+	else if (m_ctl_open || m_ctl_anim > 0.5f)
+	{
+		// PS5SX2x6: the Controls page's: every other control only lights up on the drawing, to try it.
+		if (n > 1)
+			hint("#R stick", nullptr, "Other games");
+		hint(icon::Circle, nullptr, Tr(Str::HintBack));
+	}
 	else if (m_sheet_open || m_sheet_anim > 0.5f)
 	{
 		// vk-285-114: the options sheet's buttons.
@@ -1707,6 +1744,8 @@ void App::Build(FrameDesc& f, const std::string& clock)
 			hint("#L1", "#R1", Tr(Str::HintJump));
 		}
 		hint(icon::Square, nullptr, Tr(Str::HintSettings)); // vk-285-114
+		if (m_cfg.arcade_controls && n > 0)
+			hint(icon::DpadDown, nullptr, "Controls"); // PS5SX2x6
 		if (!m_qr_big && !m_cfg.arcade)
 		{
 			hint("#R2", nullptr, "Search"); // 2.11
@@ -1728,7 +1767,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		if (!m_cfg.build_tag.empty())
 			status = m_cfg.build_tag + "   \xC2\xB7   " + status;
 	}
-	if (sheet_e < 0.5f && account_e < 0.5f)
+	if (sheet_e < 0.5f && account_e < 0.5f && ctl_e < 0.5f)
 		m_fonts->AddText(ui, status.c_str(), W - margin, hy, 36.0f * k, faint, 0.1f, Fonts::Right);
 
 	// Test build 1 (vk-285-55): testing builds say so across the middle of the shelf, over the
@@ -1792,6 +1831,262 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		BuildDiscAsk(ui, W, H, k, accent);
 	BuildSearch(ui, W, H, k, accent); // 2.11: the search line and its keyboard, over everything but the disc question
 	f.ui_images = m_achievement_images; // 2.11: the texture changes among the UI vertices (badges, the disc being copied)
+}
+
+// ---- PS5SX2x6: the Controls page ------------------------------------------------------------------------------------
+// D-pad down on the shelf opens it for the picked game: a drawing of the DualSense, and beside it, in a column on each
+// side, what each control does in that game (the host's table: orbis-shims/OrbisArcadeControls.cpp, the same the game
+// gets), with a dashed line to it; what is held now lights up. The right stick shows the other games (no game reads it
+// on the shelf's player), Circle goes back. After XPSemu Chihiro's Controls page.
+
+namespace
+{
+// A rounded rectangle turned by `angle` (radians) about its centre: the UI shader draws the shape in the quad's own frame
+// (u, v from its centre), so only the corners move.
+void AddTurnedRect(std::vector<UiVertex>& out, float cx, float cy, float w, float h, float radius, float angle, uint32_t color)
+{
+	const float hw = w * 0.5f, hh = h * 0.5f, r = std::min(radius, std::min(hw, hh));
+	const float c = std::cos(angle), s = std::sin(angle);
+	auto at = [&](float x, float y) { return UiVertex{cx + x * c - y * s, cy + x * s + y * c, x, y, color, hw, hh, r, 1}; };
+	const UiVertex a = at(-hw, -hh), b = at(hw, -hh), d = at(hw, hh), e = at(-hw, hh);
+	out.insert(out.end(), {a, b, d, a, d, e});
+}
+
+void AddCircle(std::vector<UiVertex>& out, float x, float y, float r, uint32_t color)
+{
+	Fonts::AddRoundedRect(out, x - r, y - r, 2 * r, 2 * r, r, color);
+}
+
+// A line from (x0, y0) to (x1, y1), `width` across, round at the ends.
+void AddLine(std::vector<UiVertex>& out, float x0, float y0, float x1, float y1, float width, uint32_t color)
+{
+	const float dx = x1 - x0, dy = y1 - y0, len = std::sqrt(dx * dx + dy * dy);
+	if (len < 0.5f)
+		return;
+	AddTurnedRect(out, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, len + width, width, width * 0.5f, std::atan2(dy, dx), color);
+}
+
+// Where a control is on the drawing (units of the drawing, its centre at 0, 0; XPSemu Chihiro's PsPadAnchor).
+void PadAnchor(int src, float& x, float& y)
+{
+	switch (src)
+	{
+		case pad::Cross: x = 150; y = 10; break;
+		case pad::Circle: x = 190; y = -30; break;
+		case pad::Square: x = 110; y = -30; break;
+		case pad::Triangle: x = 150; y = -70; break;
+		case pad::L1: x = -175; y = -124; break;
+		case pad::R1: x = 175; y = -124; break;
+		case pad::L2: x = -175; y = -157; break;
+		case pad::R2: x = 175; y = -157; break;
+		case pad::L3: case pad::LeftStick: x = -82; y = 48; break;
+		case pad::R3: case pad::RightStick: x = 82; y = 48; break;
+		case pad::Options: x = 118; y = -92; break;
+		case pad::Touchpad: x = 0; y = -60; break;
+		case pad::Up: x = -150; y = -60; break;
+		case pad::Down: x = -150; y = 0; break;
+		case pad::Left: x = -180; y = -30; break;
+		case pad::Right: x = -120; y = -30; break;
+		default: x = -150; y = -30; break; // the D-pad as a whole
+	}
+}
+
+// Which column its callout goes in: the controls on the drawing's left half, and the touchpad, on the left.
+bool PadLeftColumn(int src)
+{
+	switch (src)
+	{
+		case pad::L1: case pad::L2: case pad::L3: case pad::LeftStick: case pad::Touchpad:
+		case pad::Up: case pad::Down: case pad::Left: case pad::Right: case pad::DPad:
+			return true;
+		default:
+			return false;
+	}
+}
+} // namespace
+
+void App::OpenControls()
+{
+	m_ctl_open = true;
+	m_ctl_held = 0;
+	m_ctl_game = -1;
+	LoadControls();
+}
+
+void App::LoadControls()
+{
+	if (m_games.empty() || m_ctl_game == m_selected || !m_cfg.arcade_controls)
+		return;
+	m_ctl_game = m_selected;
+	m_ctl = m_index[static_cast<size_t>(m_selected)] >= 0 ? m_cfg.arcade_controls(m_games[static_cast<size_t>(m_selected)]) : ArcadeControls{};
+	const GameInfo& g = m_games[static_cast<size_t>(m_selected)];
+	std::printf("[frontend] controls of %s (%s): %s, %zu rows\n", g.title.c_str(), g.serial.c_str(), m_ctl.mode.c_str(), m_ctl.rows.size());
+	std::fflush(stdout);
+}
+
+void App::UpdateControls(double dt, const Input& in)
+{
+	m_ctl_in = in;
+	if (in.circle && !m_prev.circle)
+	{
+		m_ctl_open = false;
+		Sound(Sfx::Move, -0.3f);
+		return;
+	}
+	// The right stick: one game a push, repeating while it is held over.
+	const int dir = in.rx < -0.6f ? -1 : in.rx > 0.6f ? 1 : 0;
+	if (dir != 0 && dir != m_ctl_held)
+	{
+		Sound(Step(dir) ? Sfx::Move : Sfx::Edge, 0.18f * static_cast<float>(dir));
+		m_ctl_held = dir;
+		m_ctl_held_for = 0;
+		m_ctl_next = 0.36;
+	}
+	else if (dir != 0)
+	{
+		m_ctl_held_for += dt;
+		bool moved = false;
+		while (m_ctl_held_for >= m_ctl_next)
+		{
+			moved |= Step(dir);
+			m_ctl_next += 0.15;
+		}
+		if (moved)
+			Sound(Sfx::MoveRepeat, 0.18f * static_cast<float>(dir));
+	}
+	else
+		m_ctl_held = 0;
+	LoadControls();
+}
+
+void App::BuildControls(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent)
+{
+	if (m_games.empty())
+		return;
+	const float s = 2.0f * k; // the drawing's units: XPSemu Chihiro's at 1080 lines
+	const float cx = W * 0.5f, cy = 1130.0f * k;
+	auto at_x = [&](float x) { return cx + x * s; };
+	auto at_y = [&](float y) { return cy + y * s; };
+	const uint32_t white = Rgba(1, 1, 1), dim = Rgba(0.72f, 0.69f, 0.82f);
+	const uint32_t body = Rgba(0.11f, 0.12f, 0.19f), part = Rgba(0.21f, 0.23f, 0.33f), dark = Rgba(0.06f, 0.06f, 0.11f);
+	const uint32_t line = Rgba(0.60f, 0.62f, 0.78f), outline = (accent & 0x00FFFFFFu) | 0xBF000000u;
+	const GameInfo& g = m_games[static_cast<size_t>(m_selected)];
+
+	// The banner: CONTROLS, and the game.
+	m_fonts->AddText(ui, "CONTROLS", W * 0.5f, 250.0f * k, 44.0f * k, accent, 0.6f, Fonts::Center);
+	{
+		float px = 88.0f * k;
+		while (px > 56.0f * k && m_fonts->Measure(g.title.c_str(), px) > W * 0.8f)
+			px -= 4.0f * k;
+		m_fonts->AddText(ui, g.title.c_str(), W * 0.5f, 360.0f * k, px, white, 0.55f, Fonts::Center);
+	}
+
+	// The pad: shoulders and grips behind the body (first a little larger in the accent colour, its outline), the
+	// touchpad, the D-pad, the face buttons, the sticks.
+	for (int pass = 0; pass < 2; pass++)
+	{
+		const float gr = pass ? 0.0f : 4.0f;
+		const uint32_t col = pass ? body : outline;
+		for (int side = -1; side <= 1; side += 2)
+		{
+			Fonts::AddRoundedRect(ui, at_x(side * 175 - 52 - gr), at_y(-174 - gr), (104 + 2 * gr) * s, (36 + 2 * gr) * s, (16 + gr) * s, col);
+			Fonts::AddRoundedRect(ui, at_x(side * 175 - 56 - gr), at_y(-136 - gr), (112 + 2 * gr) * s, (24 + 2 * gr) * s, (11 + gr) * s, col);
+			AddTurnedRect(ui, at_x(side * 178), at_y(88), (164 + 2 * gr) * s, (276 + 2 * gr) * s, (82 + gr) * s, side * -0.314f, col);
+		}
+		Fonts::AddRoundedRect(ui, at_x(-245 - gr), at_y(-118 - gr), (490 + 2 * gr) * s, (168 + 2 * gr) * s, (58 + gr) * s, col);
+	}
+	for (int side = -1; side <= 1; side += 2)
+	{
+		Fonts::AddRoundedRect(ui, at_x(side * 175 - 52), at_y(-174), 104 * s, 36 * s, 16 * s, part);
+		Fonts::AddRoundedRect(ui, at_x(side * 175 - 56), at_y(-136), 112 * s, 24 * s, 11 * s, part);
+	}
+	Fonts::AddRoundedRect(ui, at_x(-93.5f), at_y(-105.5f), 187 * s, 91 * s, 15 * s, line);
+	Fonts::AddRoundedRect(ui, at_x(-92), at_y(-104), 184 * s, 88 * s, 14 * s, Rgba(0.16f, 0.18f, 0.26f));
+	for (const float x : {-118.0f, 118.0f}) // Create and Options
+		Fonts::AddRoundedRect(ui, at_x(x - 7), at_y(-92 - 13), 14 * s, 26 * s, 7 * s, part);
+	Fonts::AddRoundedRect(ui, at_x(-162), at_y(-72), 24 * s, 84 * s, 5 * s, part);
+	Fonts::AddRoundedRect(ui, at_x(-192), at_y(-42), 84 * s, 24 * s, 5 * s, part);
+	{
+		const struct
+		{
+			int src;
+			const char* glyph;
+		} face[] = {{pad::Triangle, icon::Triangle}, {pad::Circle, icon::Circle}, {pad::Cross, icon::Cross}, {pad::Square, icon::Square}};
+		const float gpx = 58.0f * k;
+		for (const auto& f : face)
+		{
+			float x, y;
+			PadAnchor(f.src, x, y);
+			AddCircle(ui, at_x(x), at_y(y), 20 * s, part);
+			m_fonts->AddText(ui, f.glyph, at_x(x), at_y(y) + (m_fonts->Ascent(gpx) - m_fonts->Descent(gpx)) * 0.5f, gpx, white, 0.0f, Fonts::Center);
+		}
+	}
+	for (const int src : {pad::L3, pad::R3})
+	{
+		float x, y;
+		PadAnchor(src, x, y);
+		AddCircle(ui, at_x(x), at_y(y), 40 * s, dark);
+		AddCircle(ui, at_x(x), at_y(y), 28 * s, line);
+		AddCircle(ui, at_x(x), at_y(y), 26 * s, part);
+	}
+	AddCircle(ui, at_x(0), at_y(20), 11 * s, line);
+	AddCircle(ui, at_x(0), at_y(20), 9.5f * s, part);
+
+	// The rows by the control each comes from: the column on its half of the drawing, top to bottom as they are on it
+	// (so the lines don't cross), each column centred on the drawing.
+	struct Row
+	{
+		const ArcadeControlRow* info;
+		float tx, ty;
+	};
+	std::vector<Row> column[2];
+	for (const ArcadeControlRow& r : m_ctl.rows)
+	{
+		float x, y;
+		PadAnchor(r.src, x, y);
+		column[PadLeftColumn(r.src) ? 0 : 1].push_back({&r, at_x(x), at_y(y)});
+	}
+	const float bw = 880.0f * k, bh = 112.0f * k, gap = 140.0f * k, tpx = 56.0f * k;
+	for (int c = 0; c < 2; c++)
+	{
+		std::vector<Row>& col = column[c];
+		std::stable_sort(col.begin(), col.end(), [](const Row& p, const Row& q) { return p.ty < q.ty; });
+		const float bx = c ? W - 200.0f * k - bw : 200.0f * k;
+		const float y0 = cy - (static_cast<float>(col.size()) - 1.0f) * gap * 0.5f - bh * 0.5f;
+		for (size_t i = 0; i < col.size(); i++)
+		{
+			const ArcadeControlRow& r = *col[i].info;
+			const float by = y0 + static_cast<float>(i) * gap;
+			const bool held = m_cfg.arcade_held && m_cfg.arcade_held(r.src, m_ctl_in);
+			// The dashed line to the control, and a dot on it.
+			const float fx = c ? bx : bx + bw, fy = by + bh * 0.5f;
+			const float dx = col[i].tx - fx, dy = col[i].ty - fy, len = std::sqrt(dx * dx + dy * dy);
+			for (float d = 0.0f; d < len; d += 24.0f * k)
+			{
+				const float d1 = std::min(d + 12.0f * k, len);
+				AddLine(ui, fx + dx * d / len, fy + dy * d / len, fx + dx * d1 / len, fy + dy * d1 / len, 3.0f * k, (line & 0x00FFFFFFu) | 0x99000000u);
+			}
+			if (held)
+			{
+				AddCircle(ui, col[i].tx, col[i].ty, 44.0f * k, (accent & 0x00FFFFFFu) | 0x59000000u);
+				AddCircle(ui, col[i].tx, col[i].ty, 18.0f * k, white);
+				Fonts::AddRoundedRect(ui, bx - 6.0f * k, by - 6.0f * k, bw + 12.0f * k, bh + 12.0f * k, 24.0f * k, accent);
+			}
+			AddCircle(ui, col[i].tx, col[i].ty, 8.0f * k, (line & 0x00FFFFFFu) | 0xCC000000u);
+			Fonts::AddRoundedRect(ui, bx, by, bw, bh, 20.0f * k, Rgba(0.09f, 0.09f, 0.18f, 0.94f));
+			const float base = by + bh * 0.5f + (m_fonts->Ascent(tpx) - m_fonts->Descent(tpx)) * 0.5f;
+			const std::string src = Fit(*m_fonts, r.src_name, tpx, bw * 0.42f);
+			const float sw = m_fonts->Measure(src.c_str(), tpx);
+			m_fonts->AddText(ui, Fit(*m_fonts, r.label, tpx, bw - sw - 104.0f * k).c_str(), bx + 40.0f * k, base, tpx, r.system ? dim : white,
+				r.system ? 0.2f : 0.45f, Fonts::Left);
+			m_fonts->AddText(ui, src.c_str(), bx + bw - 40.0f * k, base, tpx, r.system ? dim : accent, 0.45f, Fonts::Right);
+		}
+	}
+
+	// Under it: what isn't there yet for this game, or that it has no table.
+	const std::string note = m_ctl.rows.empty() ? std::string("No controls for this game.") : m_ctl.note;
+	if (!note.empty())
+		m_fonts->AddText(ui, Fit(*m_fonts, note, 48.0f * k, W * 0.86f).c_str(), W * 0.5f, 1930.0f * k, 48.0f * k, dim, 0.3f, Fonts::Center);
 }
 
 // ---- vk-285-114: the options sheet ---------------------------------------------------------------------------------

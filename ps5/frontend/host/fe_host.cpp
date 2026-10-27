@@ -226,6 +226,24 @@ bool SetButton(Input& in, const std::string& b, bool down)
 	// "l1+square": a chord, every button down (and up) in the same frame (2026-10-05, the account panel's chord).
 	if (const size_t plus = b.find('+'); plus != std::string::npos)
 		return SetButton(in, b.substr(0, plus), down) && SetButton(in, b.substr(plus + 1), down);
+	// PS5SX2x6: the D-pad's down alone (the Controls page), and the PS5's button bits the page lights up.
+	static const struct
+	{
+		const char* name;
+		uint32_t bit;
+	} bits[] = {{"left", 0x80}, {"right", 0x20}, {"up", 0x10}, {"down", 0x40}, {"dpad_down", 0x40}, {"cross", 0x4000}, {"circle", 0x2000},
+		{"square", 0x8000}, {"triangle", 0x1000}, {"options", 0x8}, {"l1", 0x400}, {"r1", 0x800}, {"l2", 0x100}, {"r2", 0x200}, {"r3", 0x4},
+		{"l3", 0x2}, {"touchpad", 0x100000}};
+	for (const auto& e : bits)
+		if (b == e.name)
+			in.pad_buttons = down ? (in.pad_buttons | e.bit) : (in.pad_buttons & ~e.bit);
+	if (b == "dpad_down")
+	{
+		in.dpad_down = down;
+		return true;
+	}
+	if (b == "l3" || b == "touchpad")
+		return true;
 	bool* p = b == "left" ? &in.left : b == "right" ? &in.right : b == "up" ? &in.up : b == "down" ? &in.down :
 	          b == "cross" ? &in.cross : b == "circle" ? &in.circle : b == "square" ? &in.square :
 	          b == "triangle" ? &in.triangle : b == "options" ? &in.options : b == "l1" ? &in.l1 : b == "r1" ? &in.r1 :
@@ -693,6 +711,7 @@ int main(int argc, char** argv)
 	std::string no_bios_problem;
 	std::string games_file, build_tag = "vk-285-114 (host)", record, record_audio; // 2026-10-08: the showcase video
 	std::string places; // 2026-10-08: --places "Label=/path|Label=/path": the folder picker's places (else the data folder's)
+	bool arcade = false; // PS5SX2x6: --arcade
 	bool tiles = false; // 2.12: --tiles: the sheet's Home screen tile row, with the stand-in helper (FakeHelper) in <data>/tiles; --own-tile <path>: this run is a game tile's
 	std::string own_tile;
 	int record_fps = 30;
@@ -742,6 +761,8 @@ int main(int argc, char** argv)
 			record = next();
 		else if (a == "--places")
 			places = next();
+		else if (a == "--arcade") // PS5SX2x6: the arcade shelf, with a stand-in for each game's controls table (the Controls page)
+			arcade = true;
 		else if (a == "--tiles")
 			tiles = true;
 		else if (a == "--own-tile")
@@ -1029,6 +1050,48 @@ int main(int argc, char** argv)
 	acfg.build_tag = build_tag;
 	acfg.options = op;
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games' "PS2 system menu" row
+	if (arcade)
+	{
+		// PS5SX2x6: rows as orbis-shims/OrbisArcadeControls.cpp makes them for Wangan Midnight (any game) and Tekken 4 (a
+		// serial with "TK"), by hand: the host has no pcsx2x6 core to ask.
+		acfg.arcade = true;
+		acfg.arcade_controls = [](const GameInfo& g) {
+			ArcadeControls c;
+			const bool fight = g.serial.find("TK") != std::string::npos;
+			c.mode = fight ? "fighting" : "driving";
+			auto row = [&c](int src, const char* name, const char* label, bool system) { c.rows.push_back({src, name, label, system}); };
+			if (fight)
+			{
+				row(pad::Square, "Square", "Left Punch", false);
+				row(pad::Triangle, "Triangle", "Right Punch", false);
+				row(pad::Cross, "Cross", "Left Kick", false);
+				row(pad::Circle, "Circle", "Right Kick", false);
+				row(pad::DPad, "D-pad", "Lever", false);
+				row(pad::LeftStick, "Left stick", "Lever", false);
+			}
+			else
+			{
+				row(pad::LeftStick, "Left stick", "Steering", false);
+				row(pad::R2, "R2", "Gas", false);
+				row(pad::L2, "L2", "Brake", false);
+				row(pad::R1, "R1", "Shift Up", false);
+				row(pad::L1, "L1", "Shift Down", false);
+				row(pad::Triangle, "Triangle", "View Change", false);
+				row(pad::DPad, "D-pad", "Menu", true);
+				row(pad::Cross, "Cross", "Enter", true);
+			}
+			row(pad::Options, "Options", "Start", true);
+			row(pad::Touchpad, "Touchpad", "Service", true);
+			row(pad::L3, "L3", "Coin", true);
+			row(pad::R3, "R3", "Test", true);
+			return c;
+		};
+		acfg.arcade_held = [](int src, const Input& in) {
+			static const uint32_t bit[pad::Count] = {0x4000, 0x2000, 0x8000, 0x1000, 0x400, 0x800, 0x100, 0x200, 0x2, 0x4, 0x8, 0x100000,
+				0x10, 0x40, 0x80, 0x20, 0xF0, 0, 0};
+			return src >= 0 && src < pad::Count && (in.pad_buttons & bit[src]) != 0;
+		};
+	}
 	// 2.12: --tiles: the sheet's Home screen tile row, and the stand-in helper that answers it. Without --tiles there is no row (the counted presses of the other scripts stay).
 	FakeHelper helper;
 	if (tiles)

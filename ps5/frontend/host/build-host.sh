@@ -20,7 +20,7 @@ CXX=${CXX:-clang++-18}
 CC=${CC:-clang-18}
 mkdir -p "$obj"
 
-flags=(-O1 -g -Wall -Wno-unused-function -I"$fe" -I"$pcsx2/pcsx2" -I"$pcsx2/3rdparty/vulkan/include" -I"$pcsx2/3rdparty/libchdr/include"
+flags=(-O1 -g -Wall -Wno-unused-function -I"$fe" -I"$pcsx2/ps5/coreorbis/include-orbis" -I"$pcsx2/pcsx2" -I"$pcsx2/3rdparty/vulkan/include" -I"$pcsx2/3rdparty/libchdr/include"
   -I"$pcsx2/ps5/third_party/lz4" -I"$pcsx2/3rdparty/rapidjson/include" -I"$pcsx2/ps5/third_party/libarchive/libarchive")
 objs=()
 for src in fe_app fe_covers fe_games fe_renderer fe_text fe_vk fe_i18n fe_settings fe_options fe_sound fe_texpacks fe_patchdl fe_bios; do

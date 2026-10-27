@@ -26,6 +26,7 @@
 #include "ps5/coreorbis/orbis-shims/ProsperoNotify.h" // 2026-10-05: the texture packs' popup
 #include "OrbisPaths.h" // live-22: OrbisLogPath for the disc-dump progress file the shelf shows
 #include "ps5/coreorbis/orbis-shims/ProsperoImeRelay.h" // 2.11: the keyboard through the ELF loader's payload (experiment, flags/imerelay)
+#include "ps5/coreorbis/orbis-shims/OrbisArcadeControls.h" // PS5SX2x6: each arcade game's controls, for the Controls page
 #ifdef PS5SX2_ACHIEVEMENTS
 #include "ps5/coreorbis/orbis-shims/ProsperoAchievements.h"
 #include "pcsx2/Achievements.h"
@@ -2048,6 +2049,25 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 	}
 #endif
 	acfg.arcade = paths.arcade;
+	if (paths.arcade)
+	{
+		// PS5SX2x6: the Controls page (D-pad down) shows the table the game gets (orbis-shims/OrbisArcadeControls.cpp).
+		static_assert(static_cast<int>(orbis_arcade::Src::RightStick) == pad::RightStick && static_cast<int>(orbis_arcade::Src::Cross) == pad::Cross &&
+		              static_cast<int>(orbis_arcade::Src::DPad) == pad::DPad, "fe::pad follows orbis_arcade::Src");
+		acfg.arcade_controls = [](const GameInfo& g) {
+			const orbis_arcade::GameControls c = orbis_arcade::ControlsFor(g.serial);
+			ArcadeControls out;
+			out.mode = c.mode;
+			out.note = c.note;
+			for (const orbis_arcade::Control& r : c.rows)
+				out.rows.push_back({static_cast<int>(r.src), orbis_arcade::SrcName(r.src), r.label, r.system});
+			return out;
+		};
+		acfg.arcade_held = [](int src, const Input& in) {
+			const orbis_arcade::Pad p = {in.pad_buttons, in.pad_lx, in.pad_ly, in.pad_rx, in.pad_ry, in.pad_l2, in.pad_r2};
+			return orbis_arcade::Held(p, static_cast<orbis_arcade::Src>(src));
+		};
+	}
 	acfg.build_tag = build_tag ? build_tag : "";
 	acfg.test_build = paths.test_build;   // test build 1: the TESTING watermark
 	acfg.build_label = paths.build_label;
@@ -2291,6 +2311,14 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 			in.circle = pd.buttons & kPadCircle;
 			in.l2 = (pd.buttons & kPadL2) || pd.l2 > 160; // vk-285-116
 			in.r2 = (pd.buttons & kPadR2) || pd.r2 > 160;
+			in.dpad_down = (pd.buttons & kPadDown) != 0; // PS5SX2x6: the Controls page, and what it lights up
+			in.pad_buttons = pd.buttons;
+			in.pad_lx = pd.lx;
+			in.pad_ly = pd.ly;
+			in.pad_rx = pd.rx;
+			in.pad_ry = pd.ry;
+			in.pad_l2 = pd.l2;
+			in.pad_r2 = pd.r2;
 		}
 		app.Update(dt, in);
 		app.Build(frame, Clock());

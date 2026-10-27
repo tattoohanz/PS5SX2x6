@@ -87,8 +87,8 @@ int main()
 	static_assert(orbis_leave::Decide(In{}) == How::ExecMain, "the main app without a relay and without flags execs itself (as before)");
 	static_assert(orbis_leave::AfterExecReturn(0) == AfterExec::KeepWaiting, "constexpr");
 	// The 176 default. Flipping it is a decision of the owner, not a tidy-up: change this line with it (everything below follows the constant).
-	// The owner chose the instant exec for the main app (2026-10-16, in chat).
-	static_assert(orbis_leave::kMainAppExecByDefault, "the main app leaves by the old exec unless menurelaunch is there (the owner's choice)");
+	// PS5SX2x6 (2026-10-28): the relaunch payload for the main app; its own eboot's exec ends at the home screen on this title.
+	static_assert(!orbis_leave::kMainAppExecByDefault, "the main app leaves by the relaunch payload unless menufast is there (PS5SX2x6)");
 	const bool by_default = orbis_leave::kMainAppExecByDefault;
 	static_assert(orbis_leave::kSettleDefaultMs == 1000 && orbis_leave::kSettleMaxMs == 5000, "the settle's default and limit");
 	static_assert(orbis_leave::kMinExitMs == 1600 && orbis_leave::kRetryMs == 400, "the payload's earliest launch after the exit, and the pause between refused launches");

@@ -28,7 +28,9 @@ namespace orbis_leave
 // 176: the one place that says whether the main app leaves by the old exec (instant, no home screen) when neither flag is there. true = the old exec (the
 // owner's choice); false = the relaunch payload (a flash of the home screen, the 175 way). The flags menufast (exec) and menurelaunch (payload) decide by
 // hand whatever this says.
-constexpr bool kMainAppExecByDefault = true;
+// PS5SX2x6 (2026-10-28): false. On this title (PPSA97376) the exec of its own eboot ends at the home screen with the app closed (leave.txt: every
+// "exec: eboot issued" with no start after it), while the payload brings the shelf back about 3 s after the press. The flag menufast still asks for the exec.
+constexpr bool kMainAppExecByDefault = false;
 
 // 176: the payload's timing. The settle is how long it waits after the shell has forgotten the closing title (175 had a fixed 1500 ms; the flag menusettle
 // sets it, 0..kSettleMaxMs). kMinExitMs: it never launches earlier than this long after the closing PROCESS exited, whatever the settle is: ShadowMount+

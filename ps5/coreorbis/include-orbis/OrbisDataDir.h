@@ -8,3 +8,7 @@
 
 #define ORBIS_DATA_DIR "/data/PCSX2x6"
 #define ORBIS_TITLE_ID "PPSA97376"
+
+// This title's own eboot: the one "back to the menu", the eboot watcher and the disc payloads start again. Not
+// PS5SX2's (/data/homebrew/PPSA99203), which would open PS5SX2's shelf when both are installed.
+#define ORBIS_OWN_EBOOT "/data/homebrew/" ORBIS_TITLE_ID "/eboot.bin"

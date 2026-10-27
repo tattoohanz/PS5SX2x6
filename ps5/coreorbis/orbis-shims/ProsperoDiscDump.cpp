@@ -76,6 +76,7 @@
 #include "OrbisDiscResume.h"
 #include "ProsperoNotify.h"
 
+#include "OrbisDataDir.h"
 #include "OrbisPaths.h"
 #include "../../frontend/fe_games.h"
 #include "../../frontend/fe_ps5.h"
@@ -871,7 +872,7 @@ namespace
 			fclose(f);
 		}
 		OrbisNotifyPlain("PS2 disc: bringing PS5SX2 back to the front");
-		const char* path = "/data/homebrew/PPSA99203/eboot.bin";
+		const char* path = ORBIS_OWN_EBOOT;
 		struct stat st{};
 		if (stat(path, &st) != 0)
 			path = "/app0/eboot.bin";
@@ -994,7 +995,7 @@ namespace
 							fprintf(rf, "disc-auto %lld\n", static_cast<long long>(time(nullptr)));
 							fclose(rf);
 						}
-						const char* path = "/data/homebrew/PPSA99203/eboot.bin";
+						const char* path = ORBIS_OWN_EBOOT;
 						struct stat st{};
 						if (stat(path, &st) != 0)
 							path = "/app0/eboot.bin";

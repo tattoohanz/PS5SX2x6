@@ -2173,9 +2173,9 @@ static std::string orbis_menu_exec_path()
     return tile + "/eboot.bin";
   }
   if (s_tile_marker_seen && !s_tile_marker_drive.empty())
-    printf("[menu] this process is a disc tile (drive %s) but its folder under /data/homebrew wasn't found: PPSA99203's eboot is used\n",
+    printf("[menu] this process is a disc tile (drive %s) but its folder under /data/homebrew wasn't found: " ORBIS_TITLE_ID "'s eboot is used\n",
       s_tile_marker_drive.c_str());
-  std::string path = "/data/homebrew/PPSA99203/eboot.bin";
+  std::string path = ORBIS_OWN_EBOOT;
   if (stat(path.c_str(), &st) != 0)
     path = "/app0/eboot.bin";
   return path;
@@ -2407,11 +2407,11 @@ static bool orbis_leave_process(bool relay, const OrbisLeaveFlags& fl)
   int exec_rc = orbis_exec_for_menu(path);
   // Only a LoadExec that was REFUSED tries the next eboot: one that was accepted (rc 0) has the kill under way, and a second ExitSpawn on top of it would be
   // two spawns at once (the same rule as for the close above).
-  if (orbis_leave::AfterExecReturn(exec_rc) == orbis_leave::AfterExec::FallBack && path != "/data/homebrew/PPSA99203/eboot.bin" && path != "/app0/eboot.bin")
+  if (orbis_leave::AfterExecReturn(exec_rc) == orbis_leave::AfterExec::FallBack && path != ORBIS_OWN_EBOOT && path != "/app0/eboot.bin")
   {
-    printf("[menu] the tile's own eboot didn't take: PPSA99203's is tried\n"); // 2.11
+    printf("[menu] the tile's own eboot didn't take: " ORBIS_TITLE_ID "'s is tried\n"); // 2.11
     fflush(stdout);
-    exec_rc = orbis_exec_for_menu("/data/homebrew/PPSA99203/eboot.bin");
+    exec_rc = orbis_exec_for_menu(ORBIS_OWN_EBOOT);
   }
   orbis_leave_note("exec: eboot returned");
   return orbis_leave::AfterExecReturn(exec_rc) == orbis_leave::AfterExec::KeepWaiting; // accepted, merely outlived the wait: the notes for the next start stay
@@ -3185,8 +3185,8 @@ static void orbis_probe_game_read(const std::string& path)
 
 static void orbis_vk_param_json()
 {
-  static const char* const paths[] = {"/mnt/sandbox/PPSA99203_000/app0/sce_sys/param.json", "/app0/sce_sys/param.json",
-                                      "/data/homebrew/PPSA99203/sce_sys/param.json"};
+  static const char* const paths[] = {"/mnt/sandbox/" ORBIS_TITLE_ID "_000/app0/sce_sys/param.json", "/app0/sce_sys/param.json",
+                                      "/data/homebrew/" ORBIS_TITLE_ID "/sce_sys/param.json"};
   std::string tried;
   for (const char* path : paths)
   {
@@ -3620,7 +3620,7 @@ int main()
         fflush(stdout);
         return;
       }
-      const char* path = "/data/homebrew/PPSA99203/eboot.bin";
+      const char* path = ORBIS_OWN_EBOOT;
       struct stat st0{};
       int rc0 = stat(path, &st0);
       printf("[boot] eboot watcher: path=%s rc=%d errno=%d size=%lld mtime=%lld\n", path, rc0,

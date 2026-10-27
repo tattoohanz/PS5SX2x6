@@ -2175,6 +2175,11 @@ static std::string orbis_menu_exec_path()
   if (s_tile_marker_seen && !s_tile_marker_drive.empty())
     printf("[menu] this process is a disc tile (drive %s) but its folder under /data/homebrew wasn't found: " ORBIS_TITLE_ID "'s eboot is used\n",
       s_tile_marker_drive.c_str());
+  // PS5SX2x6 (2026-10-28): the main app asks for /app0/eboot.bin, the path XPSemu restarts itself with on the same console. A LoadExec of
+  // /data/homebrew/PPSA97376/eboot.bin was accepted and then ended at the home screen with the app closed (leave.txt, x6-6). The shell resolves
+  // /app0 in the app's own namespace, whatever this process sees there after the jailbreak. Refused, the install folder's eboot is tried after it.
+  if (!s_tile_marker_seen || s_tile_marker_drive.empty())
+    return "/app0/eboot.bin";
   std::string path = ORBIS_OWN_EBOOT;
   if (stat(path.c_str(), &st) != 0)
     path = "/app0/eboot.bin";
@@ -2407,9 +2412,9 @@ static bool orbis_leave_process(bool relay, const OrbisLeaveFlags& fl)
   int exec_rc = orbis_exec_for_menu(path);
   // Only a LoadExec that was REFUSED tries the next eboot: one that was accepted (rc 0) has the kill under way, and a second ExitSpawn on top of it would be
   // two spawns at once (the same rule as for the close above).
-  if (orbis_leave::AfterExecReturn(exec_rc) == orbis_leave::AfterExec::FallBack && path != ORBIS_OWN_EBOOT && path != "/app0/eboot.bin")
+  if (orbis_leave::AfterExecReturn(exec_rc) == orbis_leave::AfterExec::FallBack && path != ORBIS_OWN_EBOOT)
   {
-    printf("[menu] the tile's own eboot didn't take: " ORBIS_TITLE_ID "'s is tried\n"); // 2.11
+    printf("[menu] %s was refused: " ORBIS_OWN_EBOOT " is tried\n", path.c_str()); // 2.11; PS5SX2x6: /app0 first
     fflush(stdout);
     exec_rc = orbis_exec_for_menu(ORBIS_OWN_EBOOT);
   }

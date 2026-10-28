@@ -185,6 +185,7 @@ protected:
 	std::vector<u8> m_currentdata;
 	u64 m_chksum[8] = {};
 	bool m_ispsx[8] = {};
+	bool m_ps2fs[8] = {}; // PS5SX2x6: the card had the PS2 file system when it was opened (see Close)
 	u32 m_chkaddr = 0;
 
 	// PS5 port (vk-285-31): a PS2 card's image in RAM. Reads, writes and erases work on it; the
@@ -362,9 +363,10 @@ void FileMemoryCard::Open()
 		{
 			m_fileSize[slot] = FileSystem::FSize64(m_file[slot]);
 
+			m_ps2fs[slot] = FileMcd_IsMemoryCardFormatted(m_file[slot]);
 			Console.WriteLnFmt(Color_Green, "McdSlot {} [File]: {} [{} MB, {}]", slot, Path::GetFileName(fname),
 				(m_fileSize[slot] + (MCD_SIZE + 1)) / MC2_MBSIZE,
-				FileMcd_IsMemoryCardFormatted(m_file[slot]) ? "Formatted" : "UNFORMATTED");
+				m_ps2fs[slot] ? "Formatted" : "UNFORMATTED");
 
 			m_filenames[slot] = std::move(fname);
 			m_ispsx[slot] = m_fileSize[slot] == 0x20000;
@@ -502,7 +504,11 @@ void FileMemoryCard::Close()
 		g_orbis_mcd_cached.fetch_and(~(1 << slot), std::memory_order_relaxed);
 
 		// Store checksum
-		if (!m_ispsx[slot] && FileSystem::FSeek64(m_file[slot], m_chkaddr, SEEK_SET) == 0)
+		// PS5SX2x6: only on a card with the PS2 file system, where 0x210 (page 1, the superblock cluster's unused
+		// half) holds nothing. A card in a game's own format keeps data there: SoulCalibur II's Conquest card writes
+		// page 1 of its block 0 ("checksum sector overwritten" in the log), and these 8 bytes broke that page's CRC
+		// when the app closed.
+		if (!m_ispsx[slot] && m_ps2fs[slot] && FileSystem::FSeek64(m_file[slot], m_chkaddr, SEEK_SET) == 0)
 			std::fwrite(&m_chksum[slot], sizeof(m_chksum[slot]), 1, m_file[slot]);
 
 		std::fclose(m_file[slot]);

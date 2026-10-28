@@ -1736,10 +1736,13 @@ void App::Build(FrameDesc& f, const std::string& clock)
 			const std::string scope = std::string(Tr(Str::SheetThisGame)) + " / " + Tr(Str::SheetAllGames);
 			hint("#L1", "#R1", scope.c_str());
 		}
-		std::string tabs = std::string(Tr(Str::HintSettings)) + " / " + Tr(Str::SheetControls); // vk-285-116
-		if (TabCount() > kTabAchievements)
-			tabs += std::string(" / ") + Tr(Str::Achievements);
-		hint("#L2", "#R2", tabs.c_str());
+		if (TabCount() > 1) // PS5SX2x6: the arcade sheet has one tab
+		{
+			std::string tabs = std::string(Tr(Str::HintSettings)) + " / " + Tr(Str::SheetControls); // vk-285-116
+			if (TabCount() > kTabAchievements)
+				tabs += std::string(" / ") + Tr(Str::Achievements);
+			hint("#L2", "#R2", tabs.c_str());
+		}
 	}
 	else
 	{
@@ -2202,6 +2205,9 @@ void App::OpenSheet(bool global)
 	m_sheet.SetFolderRows(!m_cfg.folder_places.empty());                // vk-285-135
 	m_tile_row = HomeTileEligible(g);                                   // 2.12: the Home screen tile row (a game with a plain image file; the flag turns it on)
 	m_sheet.SetHomeTileRow(m_tile_row);
+	m_sheet.SetArcade(m_cfg.arcade); // PS5SX2x6: no PS2-only rows, the Settings tab only
+	if (m_cfg.arcade)
+		m_sheet.SetTab(kTabSettings);
 	m_picker.open = false;
 	OptionsPaths paths = m_cfg.options;
 	if (!g || IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images; vk-285-139: the Cheat disc row
@@ -3203,11 +3209,16 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 			m_fonts->AddText(ui, name, kx + kw * 0.5f, ty + th * 0.5f + 9 * k, kpx, Rgba(0.08f, 0.08f, 0.14f), 0.6f, Fonts::Center);
 			return kw;
 		};
-		const float l2 = key_pill("L2", cx + 16 * k);
-		const float r2w = m_fonts->Measure("R2", kpx) + 20 * k;
-		key_pill("R2", cx + inner - 16 * k - r2w);
-		const float sx0 = cx + 16 * k + l2 + 14 * k, sx1 = cx + inner - 16 * k - r2w - 14 * k;
-		const int tabs = TabCount(); // PS5SX2x6: two without the achievements
+		const int tabs = TabCount(); // PS5SX2x6: one on the arcade shelf, without L2 and R2
+		float sx0 = cx + 16 * k, sx1 = cx + inner - 16 * k;
+		if (tabs > 1)
+		{
+			const float l2 = key_pill("L2", cx + 16 * k);
+			const float r2w = m_fonts->Measure("R2", kpx) + 20 * k;
+			key_pill("R2", cx + inner - 16 * k - r2w);
+			sx0 = cx + 16 * k + l2 + 14 * k;
+			sx1 = cx + inner - 16 * k - r2w - 14 * k;
+		}
 		const float seg = (sx1 - sx0) / static_cast<float>(tabs);
 		const int shown = m_sheet.tab() == kTabControls ? 1 : m_sheet.tab() == kTabAchievements ? 2 : 0;
 		const char* const names[3] = {Tr(Str::HintSettings), Tr(Str::SheetControls), Tr(Str::Achievements)};

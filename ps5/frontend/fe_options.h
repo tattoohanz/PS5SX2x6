@@ -138,6 +138,10 @@ public:
 	void SetOnlinePatchRow(bool on) { m_online_patch_row = on; }
 	// 2.12: a game's sheet gets the "Home screen tile" row (under Shelf) when the app can ask the helper for it and the game can have a tile.
 	void SetHomeTileRow(bool on) { m_home_tile_row = on; }
+	// PS5SX2x6: the arcade shelf's sheet. Only the Settings tab, without the rows that only a PS2 game uses (ArcadeHides): the
+	// recommended PS2 presets, the cheat disc, texture replacements and their folder, the game language, the network adapter,
+	// the host filesystem, fast boot, RetroAchievements' icons and the PS2 system menu. The controls are the shelf's Controls page.
+	void SetArcade(bool on) { m_arcade = on; }
 	// 2026-10-08: the sheet for all games gets the "PS2 system menu" row when the app can start it. TakeSystemMenu: true
 	// once, after the row was confirmed (Cross twice), for the app to start it.
 	void SetSystemMenuRow(bool on) { m_system_menu_row = on; }
@@ -226,6 +230,7 @@ private:
 	bool m_home_tile_row = false;    // 2.12
 	bool m_system_menu_row = false, m_system_menu = false; // 2026-10-08
 	bool m_folder_rows = false; // vk-285-135
+	bool m_arcade = false;      // PS5SX2x6: SetArcade
 	Kind m_folder_request = Kind::Header;
 	bool m_elf = false; // 2026-10-08: this sheet's game is an ELF (the Disc image row)
 	int m_armed_row = -1;

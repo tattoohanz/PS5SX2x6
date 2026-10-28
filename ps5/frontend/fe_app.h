@@ -229,7 +229,7 @@ private:
 	// vk-285-114: the options sheet.
 	void OpenSheet(bool global);
 	void SheetTab(int tab); // vk-285-116
-	int TabCount() const { return m_cfg.arcade ? kTabAchievements : kTabCount; } // PS5SX2x6: no achievements tab
+	int TabCount() const { return m_cfg.arcade ? 1 : kTabCount; } // PS5SX2x6: the Settings tab only (the controls are the Controls page)
 	void CloseSheet();
 	void UpdateSheet(double dt, const Input& in);
 	bool SheetMove(int dir); // false at either end

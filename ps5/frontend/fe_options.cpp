@@ -593,6 +593,18 @@ void OptionsSheet::SetTab(int tab)
 
 // vk-285-116: the rows of the tab shown. The settings: Recommended, the option groups, the memory cards and the patches;
 // the controls: their groups. Each ends with its own reset row.
+// PS5SX2x6: the options a System 246/256 game has no use for, left off the arcade shelf's sheet (OptionsSheet::SetArcade).
+// Host filesystem stays on by itself: the arcade games start from host:boot.elf.
+static bool ArcadeHides(const std::string& key)
+{
+	static const char* const keys[] = {"PS5SX2/CheatDiscStart", "LoadTextureReplacements", "PS5SX2/GameLanguage", "DEV9/Eth/EthEnable",
+		"EmuCore/HostFs", "EmuCore/EnableFastBoot", "PS5SX2/RAChallengeIcons"};
+	for (const char* k : keys)
+		if (key == k)
+			return true;
+	return false;
+}
+
 void OptionsSheet::BuildRows()
 {
 	m_rows.clear();
@@ -606,7 +618,9 @@ void OptionsSheet::BuildRows()
 	if (m_tab == kTabAchievements)
 		return; // Read-only browser is rendered by App (AI-assisted).
 	const bool settings = m_tab == kTabSettings;
-	if (settings && (m_has_preset || !m_global))
+	if (m_arcade && !settings)
+		return; // PS5SX2x6: the arcade sheet has the Settings tab only
+	if (settings && !m_arcade && (m_has_preset || !m_global))
 		add(Kind::Recommended, m_global ? "Recommended for all games" : "Recommended settings");
 	// vk-285-135 (AI-assisted; swordpdf: "i also want to pick a folder though the browser in the shelf"): where the games and the
 	// BIOS are, on the sheet for all games (the app runs the picker and the share list). vk-285-135b: at the top (swordpdf
@@ -617,7 +631,8 @@ void OptionsSheet::BuildRows()
 		add(Kind::GameFolders, "Game folders");
 		add(Kind::BiosFolder, "BIOS folder");
 		add(Kind::NfsShares, "NFS shares");
-		add(Kind::TexturesFolder, "Textures folder"); // 2026-10-16
+		if (!m_arcade)
+			add(Kind::TexturesFolder, "Textures folder"); // 2026-10-16
 		// 2026-10-16: and the Folders group's two switches (Scan USB drives, Scan subfolders), plain option rows
 		for (const OptionGroup& g : OptionGroups())
 			if (g.title == "Folders")
@@ -636,12 +651,18 @@ void OptionsSheet::BuildRows()
 			continue;
 		if (g.title == "Folders" && settings && m_global && m_folder_rows)
 			continue; // 2026-10-16: its rows came with the folder rows above
+		size_t shown = 0; // PS5SX2x6: a group whose rows are all PS2-only is left out, header and all
+		for (const OptionDef& d : g.items)
+			shown += !(m_arcade && ArcadeHides(d.key));
+		if (shown == 0)
+			continue;
 		add(Kind::Header, g.title);
 		// vk-285-139: the cheat disc itself, on the sheet for all games, before its switch.
-		if (g.title == "Discs" && m_global)
+		if (g.title == "Discs" && m_global && !m_arcade)
 			add(Kind::CheatDisc, "Cheat disc");
 		for (const OptionDef& d : g.items)
-			add(Kind::Option, d.label).def = &d;
+			if (!(m_arcade && ArcadeHides(d.key)))
+				add(Kind::Option, d.label).def = &d;
 		// 2.12: the game's tile on the PS5 home screen, under the Shelf group of a game's sheet (the group for all games is skipped above).
 		if (g.title == "Shelf" && !m_global && m_home_tile_row)
 		{
@@ -661,7 +682,7 @@ void OptionsSheet::BuildRows()
 	}
 	// 2026-10-08 (AI-assisted; testers asked for the PS2's own boot and menu): the PS2's menu with no disc, from the sheet
 	// for all games.
-	if (settings && m_global && m_system_menu_row)
+	if (settings && m_global && m_system_menu_row && !m_arcade)
 	{
 		add(Kind::Header, "PS2");
 		add(Kind::SystemMenu, "PS2 system menu");

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "CDVD/CDVD.h"
+#include "DEV9/ACSRAM.h"
 #include "OrbisDataDir.h"
 #include "CDVD/Ps1CD.h"
 #include "CDVD/CDVD_internal.h"
@@ -1780,6 +1781,7 @@ void cdvdVsync()
 	// FolderMemoryCard needs information on how much time has passed since the last write
 	// Call it every second.
 	sioNextFrame();
+	ACSRAM::Tick(); // PS5SX2x6: the arcade SRAM, the same way
 
 	cdvd.RTC.second++;
 	if (cdvd.RTC.second < 60)

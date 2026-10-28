@@ -29,4 +29,9 @@ namespace ACSRAM
     int ReadFile();
     int WriteFile();
     void Clear(u8 fillerbyte = 0x0);
+
+    // PS5SX2x6: the SRAM back to its file while the game runs (the board's SRAM is battery-backed), not only at
+    // VMManager::Shutdown, which the PS5 build never reaches: Tick() once an emulated second, Flush() when leaving.
+    void Tick();
+    void Flush(const char* why);
 }

@@ -8,6 +8,8 @@
 #include "ps2/BiosTools.h"
 #include "ACMACROS.h"
 
+#include <cstdio>
+
 u8 ACSRAM::buffer[ACSRAM_MAX_SIZE];
 u8 compbuf[ACSRAM_MAX_SIZE] = {0};
 std::string ACSRAM::filepath = "";
@@ -100,10 +102,44 @@ u16 ACSRAM::Read16(u32 addr) {
     return 0;
 }
 
+static bool s_dirty = false;
+static u32 s_dirty_writes = 0, s_idle_seconds = 0, s_dirty_seconds = 0;
+
 void ACSRAM::Write16(u32 addr, u16 val) {
     u32 T = GET_SRAM_OFF(addr);
     if (T < ACSRAM_MAX_SIZE) {
         ACSRAM_LOG("write16 [%04X]=%02X", T, val);
+        if (ACSRAM::buffer[T] != static_cast<u8>(val)) {
+            if (!s_dirty)
+                s_dirty_seconds = 0;
+            s_dirty = true;
+            s_dirty_writes++;
+            s_idle_seconds = 0;
+        }
         ACSRAM::buffer[T] = val;
     } else OOB_REPORT(T);
+}
+
+// Like the memory cards' RAM cache: written after 2 seconds without a change, or 5 seconds into a stretch of changes.
+void ACSRAM::Tick() {
+    if (!s_dirty)
+        return;
+    s_idle_seconds++;
+    s_dirty_seconds++;
+    if (s_idle_seconds >= 2)
+        Flush("idle");
+    else if (s_dirty_seconds >= 5)
+        Flush("busy");
+}
+
+void ACSRAM::Flush(const char* why) {
+    if (!s_dirty || ACSRAM::filepath.empty())
+        return;
+    const u32 writes = s_dirty_writes;
+    s_dirty = false;
+    s_dirty_writes = s_idle_seconds = s_dirty_seconds = 0;
+    const int rc = ACSRAM::WriteFile();
+    std::printf("[sram] %s: %u changed byte write(s) -> %s %s\n", why, writes,
+        std::string(Path::GetFileName(ACSRAM::filepath)).c_str(), rc == 0 ? "saved" : "NOT saved");
+    std::fflush(stdout);
 }

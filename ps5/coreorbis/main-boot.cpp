@@ -63,6 +63,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "orbis-shims/OrbisArcadeControls.h" // PS5SX2x6: each game's DualSense controls
 #include "SIO/Memcard/MemoryCardFile.h" // vk-285-48: FileMcd_EmuClose/Open
 #include "CDVD/CDVD.h"                  // vk-285-48: cdvdSaveNVRAM
+#include "DEV9/ACSRAM.h"                // PS5SX2x6: the arcade SRAM on the way out
 #include "SPU2/spu2.h"                  // vk-285-48: SPU2::SetOutputPaused
 #include "VUmicro.h"                    // vk-285-76: CpuVU0/CpuVU1->Reset() after a VU codegen switch
 #include "OrbisEEDiag.h"                // vk-285-100: OrbisCoreCyclesPerTsc
@@ -2472,6 +2473,7 @@ static void orbis_back_to_menu()
   const long long t_saves = orbis_steady_us();
   FileMcd_EmuClose();
   cdvdSaveNVRAM();
+  ACSRAM::Flush("leave"); // PS5SX2x6: an arcade game's SRAM (no-op otherwise)
 #ifdef PS5SX2_ACHIEVEMENTS
   // pr9n (AI-assisted), PR #9 review item 9: unlocks and leaderboard entries still being sent went with the process.
   // Up to 5 s for them (a retry of one that failed included), on this thread, the one that polled them in the game;

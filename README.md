@@ -1,3 +1,139 @@
+# PS5SX2x6 (unofficial fork)
+
+> **Unofficial fork** of [Swordpdf/PS5SX2](https://github.com/Swordpdf/PS5SX2) with the arcade core of
+> [pcsx2x6](https://github.com/PS2Homebrew-arcade/PCSX2x6), maintained by
+> [tattoohanz](https://github.com/tattoohanz). Not affiliated with or endorsed by Swordpdf, the pcsx2x6
+> team, the PCSX2 team, Bandai Namco or Sony. Please report problems with this fork here, not to PS5SX2
+> or pcsx2x6.
+
+PS5SX2x6 runs Namco's **System 246, System 256 and Super System 256** arcade games on a PS5, with
+pcsx2x6's emulation of those boards on top of PS5SX2. It is a separate title, **`PPSA97376`**, with its
+own data folder **`/data/PCSX2x6/`**, so an installed PS5SX2 (`PPSA99203`, `/data/PCSX2/`) is not
+touched. The code is on the **`x6`** branch.
+
+Played on a PS5 so far:
+- **Wangan Midnight** (NM00008): picture, sound and controls.
+- **Soul Calibur II** (NM00007), Conquest mode included, with a Conquest card made by
+  [SC2MAKER](https://github.com/israpps/SC2MAKER).
+- **Battle Gear 3** (NM00010): the game runs. It keeps no player data without NESYS, its online service,
+  which isn't emulated yet.
+
+### What this fork adds to PS5SX2
+
+- **pcsx2x6's arcade core** (pcsx2x6 `583f0e909`, merged over PS5SX2's PCSX2): the COH-H BIOS, the
+  security dongle on the memory card port, the CD, DVD and hard disk media from CHD images, the JVS I/O
+  board, the SRAM, and the System 256's clocks.
+- **An arcade shelf**: PS5SX2's cover shelf lists the `.acgame` files, without the PS2-only parts
+  (RetroAchievements, the QR code, search, memory cards, cheats, texture packs). Square opens a game's
+  settings (display, graphics, performance), for that game or for all.
+- **The DualSense on the JVS board**, with each game's controls from pcsx2x6's tables, and a
+  **Controls page** for every game: D-pad down on the shelf.
+- **Arcade fixes**:
+  - CHD images up to 80 GB;
+  - hard disk games from a CD-type CHD (Battle Gear 3);
+  - the SRAM saved while the game runs and when you leave it (before, only at shutdown, which the PS5
+    app never reaches);
+  - no PS2 checksum written into a card without the PS2 file system (the Conquest card).
+- **`bootturbo`**: an arcade game boots without the frame limiter (Wangan Midnight's boot is about 18 s
+  at full speed). Switches below.
+
+### Install
+
+1. Extract the zip and copy `PPSA97376/` to `/data/homebrew/` (ShadowMountPlus installs it), and
+   `PCSX2x6/` to `/data/`.
+2. Add the line `PPSA97376` to `/data/whitelist.txt` and load the PS5SX2 Helper (from
+   [PS5SX2's releases](https://github.com/Swordpdf/PS5SX2/releases)) with kstuff, as for PS5SX2.
+3. Copy **your own** System 246 or 256 BIOS (COH-H) into `/data/PCSX2x6/bios/`. A System 256 BIOS runs
+   the 246 games too; the 256 games want one.
+4. Copy your games as pcsx2x6 lays them out: the `.acgame` file into `/data/PCSX2x6/games/`, the
+   game's files into a folder named after its game ID beside it, the dongle into
+   `/data/PCSX2x6/memcards/` (below).
+5. Start PS5SX2x6 and pick the game.
+
+No BIOS, dongle, game or artwork is included.
+
+### Folder layout on the PS5
+
+| Path | What it is |
+|---|---|
+| `/data/PCSX2x6/bios/` | Your COH-H BIOS (any file name). |
+| `/data/PCSX2x6/games/NM00008.acgame` | A game: pcsx2x6's INI file, `[game]` `name`, `gameid`, and in `[data]` anything not at its default (`elf`, `mediasrc`, `media`, `dongle`, `card`, `sram`, `jvsmode`). [pcsx2x6's game config page](https://ps2homebrew-arcade.github.io/pcsx2x6/game_config/) has every key. |
+| `/data/PCSX2x6/games/NM00008/` | The game's files: `boot.elf`, its CD, DVD or hard disk image `NM00008.chd`, and `sram.bin` (written by the game). |
+| `/data/PCSX2x6/memcards/NM00008.ps2` | The game's security dongle: the whole card dump with its ECC, 8,650,752 bytes (MAME's `.ic002` files are such dumps). Soul Calibur II's Conquest card goes here too (`card=Card0.conquestcard` in its `.acgame`). |
+| `/data/PCSX2x6/resources/GameIndex.yaml` | pcsx2x6's game database, from the release: each game's board, media and fixes. |
+| `/data/PCSX2x6/settings/` | Each game's settings, written by the shelf's settings sheet. |
+| `/data/PCSX2x6/covers/` | Optional: your own pictures (`.png` or `.jpg`), named after the game ID (`NM00008.png`), the `.acgame`'s file name or the game's name. Without one, the shelf paints a case with the game's name. |
+| `/data/PCSX2x6/patches/` | `.pnach` patches, as in PCSX2. |
+| `/data/PCSX2x6/flags/` | Switches: an empty file per switch. |
+| `/data/PCSX2x6/logs/` | `boot.log` and `emulog.txt` of the last sessions. Attach both to a problem report. |
+
+### Switches: `/data/PCSX2x6/flags/`
+
+| File | What it does |
+|---|---|
+| `bootturbo` | An arcade game boots without the frame limiter. The limiter comes back with the game's first sound, a button pressed from the second second on, or after 60 s of game time; `boot.log` says when (`[bootturbo] off`). |
+
+PS5SX2's other flags work as in PS5SX2.
+
+### Controls
+
+**Shelf**: D-pad left / right browse (L1 / R1 a page at a time), Cross or Options plays, Square opens
+the game's settings (L1 / R1 this game or all games, Circle closes them), **D-pad down** shows its
+controls: a DualSense with what each button does in that game. Press a button to see it light up; the
+right stick shows the other games, Circle goes back.
+
+**Every game**: Options is Start, the touchpad click Service, L3 a coin, R3 the Test switch (on, off).
+The test menu's Enter (Button 1) is on the first of Cross, Square, Triangle, Circle, L1 and R1 that the
+game leaves free. Hold L1 + R1 and click the touchpad to go back to the shelf.
+
+| Games | DualSense |
+|---|---|
+| Driving (Wangan Midnight, Ridge Racer V, Battle Gear 3, ...) | Left stick steering, R2 gas, L2 brake, shift up, shift down and view on R1, L1 and Triangle (Battle Gear 3: sidebrake on Square, hazard on Circle), the D-pad for the menus where the game leaves it free. |
+| Fighting and button games | Their buttons as pcsx2x6 sets them, the lever on the D-pad and the left stick. |
+| Zoids | The two levers on the sticks, their triggers and buttons. |
+| Taiko no Tatsujin | Don on D-pad left and Circle, Ka on L1 and R1. |
+| Touch panel games | The left stick points, Cross touches. |
+| Gun games | The left stick aims, R2 the trigger, L2 the pedal (Vampire Night: reload). |
+
+Each game's Controls page has its exact buttons.
+
+### Known limitations
+
+- **Player 1 only:** one DualSense drives the JVS board.
+- **No crosshair or touch pointer** is drawn on the screen yet (gun and touch panel games).
+- **No NESYS:** Battle Gear 3 keeps no player data.
+- **No force feedback** on the DualSense yet.
+- Most games haven't been tried on a PS5: the list at the top is all that has.
+
+### Building
+
+As for PS5SX2 (below, and [`ps5/README.md`](ps5/README.md)), with `ps5/coreorbis/link-radv.sh` for the
+link against [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)'s RADV and its payload SDK fork.
+The app folder `PPSA97376/` holds `eboot.bin`, `sce_sys/` and `sce_module/libc.prx` (PS5_Vulkan's
+`runtime/libc.prx`). The `[boot] sources:` line at the top of `boot.log` names the commit a build was
+made from.
+
+### Credits for this fork
+
+- **[Swordpdf](https://github.com/Swordpdf)** for [PS5SX2](https://github.com/Swordpdf/PS5SX2), which
+  this fork builds on, and everyone in PS5SX2's credits below.
+- **[PS2Homebrew-arcade](https://github.com/PS2Homebrew-arcade)** (Matías Israelson,
+  [israpps](https://github.com/israpps)) for [pcsx2x6](https://github.com/PS2Homebrew-arcade/PCSX2x6),
+  its arcade core, controls tables and game database, and those it thanks: Tovarichtch, DiscoStarSlayer,
+  Uyjulian, krHACKen.
+- **israpps** for [SC2MAKER](https://github.com/israpps/SC2MAKER) (Soul Calibur II's Conquest cards).
+- **[mihawk-99](https://github.com/mihawk-99)** for PS5_Vulkan (RADV on the PS5) and its payload SDK
+  fork, and **[ps5-payload-dev](https://github.com/ps5-payload-dev/sdk)** for the payload SDK.
+
+### License
+
+GPL-3.0-or-later, like PS5SX2, pcsx2x6 and PCSX2. This fork **does not include** any Namco or Sony
+content: no BIOS, dongle, game or artwork. Use your own dumps.
+
+---
+
+## The original PS5SX2 README
+
 <p align="center">
   <img src="ps5/docs/banner.png" alt="PS5SX2" width="100%">
 </p>

@@ -7,6 +7,7 @@
 #include "ACMACROS.h"
 
 #include <sys/stat.h>
+#include <algorithm>
 #include <cstring>
 
 #include "ACATA_CMD_RESPONSES"
@@ -33,12 +34,13 @@ static void ata_build_identify()
 	ata_identify_buf[47] = 0x8010;
 	ata_identify_buf[49] = 0x0300;
 	ata_identify_buf[53] = 0x0007;
-	if (ACATA::TH::IMAGE) {
-		if (ACATA::TH::IMAGESIZE > 0) {
-			ata_total_sectors = (u32)(ACATA::TH::IMAGESIZE / ATA_SECTORSIZE);
-			ata_identify_buf[60] = ata_total_sectors & 0xFFFF;
-			ata_identify_buf[61] = (ata_total_sectors >> 16) & 0xFFFF;
-		}
+	// The size of the open image, a plain file or a CHD (a CHD has no FILE*, only IMAGESIZE): with a CHD
+	// this used to report 0 sectors.
+	ata_total_sectors = 0;
+	if (ACATA::TH::IMAGESIZE > 0) {
+		ata_total_sectors = (u32)std::min<s64>(ACATA::TH::IMAGESIZE / ATA_SECTORSIZE, 0x0FFFFFFF);
+		ata_identify_buf[60] = ata_total_sectors & 0xFFFF;
+		ata_identify_buf[61] = (ata_total_sectors >> 16) & 0xFFFF;
 	}
 	ata_identify_buf[63] = 0x0407;
 	ata_identify_buf[80] = 0x001E;
@@ -220,6 +222,16 @@ u16 ACATA::handle_dataR(u32 addr) { // PIO read at R_DATA
 
 void ACATA::handle_cmd(u16 val) {
     CLRB(R_STATUS, ATA_STAT_DRQ);
+    switch (val) { // the commands below log themselves; the rest get one line here
+    case ATA_C_NOP: case ATA_C_PACKET: case ATA_C_IDENTIFY_PACKET_DEVICE: case ATA_C_IDENTIFY_DEVICE:
+    case ATA_C_READ_SECTOR: case ATA_C_READ_DMA: case ATA_C_READ_DMA_WITHOUT_RETRIES: case ATA_C_WRITE_DMA:
+    case ATA_C_WRITE_DMA_WITHOUT_RETRIES: case ATA_C_SET_FEATURES: case ATA_C_DEVICE_RESET:
+        break;
+    default:
+        ACATA_LOG("CMD:%02X features:%02X nsector:%02X lba:%02X%02X%02X%02X", val, R_FEATURE, R_NSECTOR,
+            R_SELECT & 0x0F, R_HCYL, R_LCYL, R_SECTOR);
+        break;
+    }
     switch (val) {
     case ATA_C_NOP:
         ACATA::cmd_handled = val;
@@ -245,8 +257,8 @@ void ACATA::handle_cmd(u16 val) {
         ACCORE::intr(ACCORE::INTRN_ATA);
     break;
     case ATA_C_IDENTIFY_DEVICE:
-        ACATA_LOG("ATA_C_IDENTIFY_DEVICE");
         ata_build_identify();
+        ACATA_LOG("ATA_C_IDENTIFY_DEVICE: %u sectors (%s)", ata_total_sectors, ACATA::TH::isCHD ? "CHD" : "image file");
         ACATA::cmd_handled = val;
         ACATA::cmd_handledc = 0;
         R_STATUS |= ATA_STAT_DRQ;

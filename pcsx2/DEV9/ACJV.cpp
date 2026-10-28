@@ -8,7 +8,13 @@
 #include "ImGui/ImGuiManager.h"
 #include "GS/GS.h"
 #include "common/SettingsInterface.h"
+#include "common/FileSystem.h"
+#include "common/Path.h"
+#include "ACSRAM.h"
 #include <algorithm>
+#include <cstring>
+#include <optional>
+#include <vector>
 #include <array>
 #include <atomic>
 #include <string>
@@ -913,14 +919,195 @@ static void UpdateWheelChannels()
 	m_jvsWheelChannels[2] = static_cast<u16>(std::clamp(m_wheelBrake, 0.0f, 1.0f) * pedalMax); // brake
 }
 
+// ---- Battle Gear 3 / Tuned: Taito NESYS Entry Key on the I/O board (vendor commands 0x6A-0x70, 0x74, 0x75) ----
+// Static analysis of BGRLOAD's key driver (task 0x101238, frame builder 0x100e68):
+//   6D           status: data[0] 0 = ready, 1..0x0F busy
+//   6A hi lo     start reading the blocks in mask (hi&7)<<8|lo      6B hi lo  -> lead byte + 4 bytes per block
+//   6C hi lo d.. write 4 bytes per block in mask                     6E        (report only)
+//   6F           start reading the serial                            70        -> lead byte + 8-byte serial
+//   75 a 01      -> 2 bytes of the 128-byte EEPROM (word a)          74 a 01 b0 b1  write that word
+// The driver checks a sum at reply[len+2]; ACJV emits no checksum, so each key reply ends in a byte equal to that sum
+// (or a harmless pad if the IOP side adds its own). Needs proper testing on the console.
+// File: bg3key.bin next to the game's SRAM: serial[8] + blocks[11*4] + eeprom[128] = 180 bytes.
+namespace BG3Key
+{
+	static constexpr size_t kSerial = 0, kBlocks = 8, kEeprom = 8 + 44, kSize = 8 + 44 + 128;
+	static std::array<u8, kSize> s_key{};
+	static bool s_loaded = false;
+	static std::string s_path;
+
+	static std::string PathFor()
+	{
+		const std::string_view dir = ACSRAM::filepath.empty() ? std::string_view() : Path::GetDirectory(ACSRAM::filepath);
+		return dir.empty() ? std::string("bg3key.bin") : Path::Combine(dir, "bg3key.bin");
+	}
+
+	static void Save()
+	{
+		if (!FileSystem::WriteBinaryFile(s_path.c_str(), s_key.data(), s_key.size()))
+			Console.Error("BG3KEY: could not write %s", s_path.c_str());
+	}
+
+	static void Load()
+	{
+		const std::string path = PathFor();
+		if (s_loaded && path == s_path)
+			return;
+		s_path = path;
+		s_loaded = true;
+		if (std::optional<std::vector<u8>> d = FileSystem::ReadBinaryFile(s_path.c_str()); d && d->size() == kSize)
+		{
+			std::memcpy(s_key.data(), d->data(), kSize);
+			Console.WriteLn("BG3KEY: loaded %s", s_path.c_str());
+			return;
+		}
+		// A new key: serial "MODLAND" + 0x01, Key ID "ML0001" (2 letters + u16 BE), version 0, the rest zero.
+		s_key.fill(0);
+		static constexpr u8 serial[8] = {'M', 'O', 'D', 'L', 'A', 'N', 'D', 0x01};
+		std::memcpy(&s_key[kSerial], serial, 8);
+		s_key[kBlocks + 0] = 'M';
+		s_key[kBlocks + 1] = 'L';
+		s_key[kBlocks + 2] = 0x00;
+		s_key[kBlocks + 3] = 0x01;
+		Console.WriteLn("BG3KEY: no valid %s (180 bytes), made a new key ML0001", s_path.c_str());
+		Save();
+	}
+
+	static bool IsKeyCommand(u8 cmd) { return (cmd >= 0x6A && cmd <= 0x70) || cmd == 0x74 || cmd == 0x75; }
+
+	// Consumes cmd's arguments and writes report + data + the sum byte. Returns false if the packet is too short.
+	static bool Handle(u8 cmd, const u8*& input, u8& inSize, u32& inWorkChecksum, u8*& output, u8* dstSize, const u8* reply_base)
+	{
+		auto arg = [&](u8& v) {
+			if (inSize == 0)
+				return false;
+			v = *input++;
+			inSize--;
+			inWorkChecksum += v;
+			return true;
+		};
+		Load();
+		u8 data[1 + 4 * 11 + 1];
+		size_t n = 0;
+		switch (cmd)
+		{
+			case 0x6D: data[n++] = 0x00; break; // ready
+			case 0x6E:
+			case 0x6F: break;
+			case 0x6A:
+			case 0x6B:
+			case 0x6C:
+			{
+				u8 hi, lo;
+				if (!arg(hi) || !arg(lo))
+					return false;
+				const u16 mask = static_cast<u16>(((hi & 7) << 8) | lo);
+				if (cmd == 0x6B)
+					data[n++] = 0x00; // lead byte (the driver skips it)
+				for (int b = 0; b < 11; b++)
+				{
+					if (!(mask & (1u << b)))
+						continue;
+					for (int i = 0; i < 4; i++)
+					{
+						if (cmd == 0x6B)
+							data[n++] = s_key[kBlocks + b * 4 + i];
+						else if (cmd == 0x6C)
+						{
+							u8 v;
+							if (!arg(v))
+								return false;
+							s_key[kBlocks + b * 4 + i] = v;
+						}
+					}
+				}
+				if (cmd == 0x6C)
+					Save();
+				break;
+			}
+			case 0x70:
+				data[n++] = 0x00; // lead byte
+				std::memcpy(&data[n], &s_key[kSerial], 8);
+				n += 8;
+				break;
+			case 0x74:
+			case 0x75:
+			{
+				u8 a, one, b0 = 0, b1 = 0;
+				if (!arg(a) || !arg(one))
+					return false;
+				if (cmd == 0x74 && (!arg(b0) || !arg(b1)))
+					return false;
+				const size_t off = kEeprom + (static_cast<size_t>(a) * 2) % 128;
+				if (cmd == 0x74)
+				{
+					s_key[off] = b0;
+					s_key[off + 1] = b1;
+					Save();
+				}
+				else
+				{
+					data[n++] = s_key[off];
+					data[n++] = s_key[off + 1];
+				}
+				break;
+			}
+		}
+		(*output++) = JVS_CMD_SUCCESS; // report
+		(*dstSize)++;
+		for (size_t i = 0; i < n; i++)
+		{
+			(*output++) = data[i];
+			(*dstSize)++;
+		}
+		// Sum byte: [1] + [2] + [3] + every byte before it, with [2] (the size) counting this byte too.
+		(*dstSize)++;
+		u32 sum = reply_base[1] + *dstSize;
+		for (const u8* p = reply_base + 3; p < output; p++)
+			sum += *p;
+		(*output++) = static_cast<u8>(sum);
+		return true;
+	}
+} // namespace BG3Key
+
 void do_jvs_packet(const u8* input, u8* output) {
 	input++;
 	u8 inDest = *input++;
 	u8 inSize = *input++;
 	u8 outSize = 0;
+
+	// LOG-ONLY (BG3 Entry Key): dump packets whose first command is a key command (0x6A-0x70, 0x74, 0x75).
+	// Repeats of the same packet are counted, not printed, so the 0x6D busy-poll loop stays readable.
+	if ((s_gameid == "NM00010" || s_gameid == "NM00015") && inSize != 0)
+	{
+		const u8 c0 = input[0];
+		if ((c0 >= 0x6A && c0 <= 0x70) || c0 == 0x74 || c0 == 0x75)
+		{
+			static u8 s_lastPkt[0x100];
+			static u8 s_lastLen = 0;
+			static u32 s_repeat = 0;
+			static u32 s_lines = 0;
+			if (inSize == s_lastLen && std::memcmp(s_lastPkt, input, inSize) == 0)
+				s_repeat++;
+			else if (s_lines < 400)
+			{
+				char hex[0x100 * 3 + 1];
+				int n = 0;
+				for (u8 i = 0; i < inSize - 1; i++) // last byte is the checksum
+					n += std::snprintf(hex + n, sizeof(hex) - n, "%02X ", input[i]);
+				Console.WriteLn("BG3KEY: dest=%02X len=%u cmd: %s(prev repeated %u)", inDest, inSize, hex, s_repeat);
+				std::memcpy(s_lastPkt, input, inSize);
+				s_lastLen = inSize;
+				s_repeat = 0;
+				s_lines++;
+			}
+		}
+	}
 	u32 inWorkChecksum = inDest + inSize;
 	inSize--;
 
+	u8* const replyStart = output;
+	const bool bg3 = (s_gameid == "NM00010" || s_gameid == "NM00015");
 	(*output++) = JVS_SYNC;
 	(*output++) = 0x00; //Master ID?
 	u8* dstSize = output++;
@@ -930,6 +1117,28 @@ void do_jvs_packet(const u8* input, u8* output) {
 		u8 cmd = (*input++);
 		inSize--;
 		inWorkChecksum += cmd;
+		if (bg3 && BG3Key::IsKeyCommand(cmd))
+		{
+			if (!BG3Key::Handle(cmd, input, inSize, inWorkChecksum, output, dstSize, replyStart))
+				break;
+			// LOG: the reply, once per change (the 0x6D poll repeats).
+			static u8 s_lastRep[0x40];
+			static size_t s_lastRepLen = 0;
+			static u32 s_repLines = 0;
+			const size_t repLen = static_cast<size_t>(output - replyStart);
+			if (repLen <= sizeof(s_lastRep) && (repLen != s_lastRepLen || std::memcmp(s_lastRep, replyStart, repLen) != 0) && s_repLines < 400)
+			{
+				char hex[0x40 * 3 + 1];
+				int hn = 0;
+				for (size_t i = 0; i < repLen; i++)
+					hn += std::snprintf(hex + hn, sizeof(hex) - hn, "%02X ", replyStart[i]);
+				Console.WriteLn("BG3KEY: reply %s", hex);
+				std::memcpy(s_lastRep, replyStart, repLen);
+				s_lastRepLen = repLen;
+				s_repLines++;
+			}
+			continue;
+		}
 		switch(cmd) {
 		case JVS::RESET: {
 			JVS_ASSERT(inSize != 0);

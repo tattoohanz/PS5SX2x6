@@ -184,6 +184,7 @@ static constexpr InputBindingInfo s_race_bg3[] = { // Battle Gear 3 (switch chai
 	{"BG3_View",      TRANSLATE_NOOP("JVS", "View Change"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_DOWN,  GenericInputBinding::Triangle},
 	{"BG3_Sidebrake", TRANSLATE_NOOP("JVS", "Sidebrake"),   nullptr, InputBindingInfo::Type::Button, JVS_BTN_LEFT,  GenericInputBinding::Square},
 	{"BG3_Hazard",    TRANSLATE_NOOP("JVS", "Hazard"),      nullptr, InputBindingInfo::Type::Button, JVS_BTN_UP,    GenericInputBinding::Circle},
+	{"BG3_KeySensor", TRANSLATE_NOOP("JVS", "Entry Key Sensor"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_6, GenericInputBinding::Cross}, // KEY SENSOR = P1 Push6 (layout table @0x1ec660, raw 0x0010)
 };
 
 static constexpr ACJV::RacingLayoutInfo s_racing_layout_ui[] = {

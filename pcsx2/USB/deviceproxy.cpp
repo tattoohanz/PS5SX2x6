@@ -15,6 +15,7 @@
 #include "usb-pad/usb-trance-vibrator.h"
 #include "usb-pad/usb-turntable.h"
 #include "usb-printer/usb-printer.h"
+#include "usb-pegasus/usb-pegasus.h"
 #include "usb-lightgun/guncon2.h"
 
 RegisterDevice* RegisterDevice::registerDevice = nullptr;
@@ -85,6 +86,7 @@ void RegisterDevice::Register()
 	inst.Add(DEVTYPE_GAMETRAK, new usb_pad::GametrakDevice());
 	inst.Add(DEVTYPE_REALPLAY, new usb_pad::RealPlayDevice());
 	inst.Add(DEVTYPE_TRAIN, new usb_pad::TrainDevice());
+	inst.Add(DEVTYPE_PEGASUS, new usb_pegasus::PegasusDevice());
 }
 
 void RegisterDevice::Unregister()

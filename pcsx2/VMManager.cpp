@@ -1485,8 +1485,13 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				// Attach the 2nd GunCon2 only for 2-player games, so 1-player cabinets show no extra crosshair.
 				const bool lightgun = (mode == JVS_MODE::LIGHTGUN);
 				const bool two_gun = lightgun && ACJV::GetGunMapping().p2_start != 0;
-				Host::SetBaseStringSettingValue("USB1", "Type", lightgun ? "guncon2" : "None");
+				// PS5SX2x6: Battle Gear 3 / Tuned reach NESYS through a USB Ethernet adapter (LANEGG.IRX takes only I-O DATA's
+				// Pegasus ones): USB-ET/TX on USB1.
+				const bool bg3 = (s_serial == "NM00010" || s_serial == "NM00015");
+				Host::SetBaseStringSettingValue("USB1", "Type", lightgun ? "guncon2" : bg3 ? "pegasus" : "None");
 				Host::SetBaseStringSettingValue("USB2", "Type", two_gun ? "guncon2" : "None");
+				if (bg3)
+					Console.WriteLn("ACGAME: %s: USB Ethernet (Pegasus USB-ET/TX) on USB1", s_serial.c_str());
 				ACJV::SetMode(mode);
 				Console.WriteLn(Color_Green, "ACGAME: jvsmode=%s -> JVS device mode %d%s",
 					jvsmode.empty() ? "(derived from gameid)" : jvsmode.c_str(),

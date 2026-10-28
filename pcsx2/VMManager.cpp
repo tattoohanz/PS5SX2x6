@@ -43,6 +43,7 @@
 #include "Vif_Dynarec.h"
 #include "VMManager.h"
 #include "OrbisEEProf.h"
+#include "OrbisBootTurbo.h"
 #include "ps2/BiosTools.h"
 
 #include "common/Console.h"
@@ -3234,6 +3235,8 @@ void VMManager::Internal::EntryPointCompilingOnCPUThread()
 
 void VMManager::Internal::VSyncOnCPUThread()
 {
+	OrbisBootTurboVsync(); // PS5SX2x6: the arcade boot's limiter comes back (flag bootturbo)
+
 	Pad::UpdateMacroButtons();
 
 	Patch::ApplyVsyncPatches();

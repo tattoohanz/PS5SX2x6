@@ -67,6 +67,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "VUmicro.h"                    // vk-285-76: CpuVU0/CpuVU1->Reset() after a VU codegen switch
 #include "OrbisEEDiag.h"                // vk-285-100: OrbisCoreCyclesPerTsc
 #include "OrbisDeferredLog.h"            // vk-285-104: orbis_log_drain (the ticker)
+#include "OrbisBootTurbo.h"              // PS5SX2x6: the arcade boot without the frame limiter (flag bootturbo)
 #include "orbis-shims/OrbisTextureRoots.h" // vk-285-113: a game's texture pack on a USB drive
 #include "orbis-shims/ProsperoKbdMouse.h" // vk-285-72, vk-285-113: the PS5's USB keyboard and mouse
 #include "orbis-shims/OrbisPadMap.h"     // vk-285-116: the controller remapping
@@ -853,6 +854,7 @@ static bool orbis_is_acgame(const std::string &path)
 // PS5SX2x6: set when the game started is an arcade one; player 1's DualSense then goes to the JVS board, not the PS2 pad
 // (a System 246/256 has no controller in its ports).
 static std::atomic<bool> g_orbis_arcade{false};
+static bool s_boot_turbo = false; // PS5SX2x6: the flag bootturbo, for this game start
 
 // PS5SX2x6: player 1's DualSense as the cabinet's controls, through pcsx2x6's JVS board (DEV9/ACJV), by the game's table
 // (orbis-shims/OrbisArcadeControls.cpp: pcsx2x6's own layouts and default pad buttons, the cabinet's Start, coin, Test,
@@ -1149,7 +1151,15 @@ static void *orbis_pad_thread(void *)
           d.buttons &= ~0x00100000u;
       }
       if (g_orbis_arcade.load(std::memory_order_relaxed))
+      {
+        // PS5SX2x6: a button newly pressed ends the unthrottled boot (flag bootturbo; OrbisBootTurbo.cpp).
+        static uint32_t s_turbo_prev = 0;
+        const uint32_t held = d.buttons & 0x0010FFFEu; // the buttons and the touchpad, not the status bits
+        if (held & ~s_turbo_prev)
+          OrbisBootTurboNoteInput();
+        s_turbo_prev = held;
         orbis_jvs_apply(d); // PS5SX2x6: the arcade game's JVS board
+      }
       else if (g_orbis_port1_guitar.load(std::memory_order_relaxed))
         orbis_pad_apply_guitar(port1, d, have_usb ? &usb_now : nullptr); // vk-285-140
       else
@@ -4614,6 +4624,10 @@ int main()
     params.filename = s_game_path;
     g_orbis_arcade.store(true, std::memory_order_relaxed);
     printf("[boot] arcade game %s (pcsx2x6 .acgame): the DualSense goes to the JVS board\n", s_game_path.c_str());
+    // PS5SX2x6: the flag bootturbo starts the boot without the frame limiter (OrbisBootTurbo.cpp ends it).
+    s_boot_turbo = orbis_flag("bootturbo");
+    if (s_boot_turbo)
+      params.start_unlimited = true;
     fflush(stdout);
   }
 
@@ -4969,6 +4983,8 @@ int main()
     printf("[boot] Execute: self=%p rsp=%p\n", (void*)pthread_self(), (void*)stk);
     fflush(stdout);
   }
+  if (s_boot_turbo)
+    OrbisBootTurboArm();
   VMManager::Execute();
   printf("[boot] Execute returned (first tenure)\n");
   fflush(stdout);

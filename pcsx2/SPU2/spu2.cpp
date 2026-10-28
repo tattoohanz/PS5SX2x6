@@ -12,6 +12,7 @@
 #include "MTGS.h"
 #include "R3000A.h"
 #include "VMManager.h"
+#include "OrbisBootTurbo.h"
 
 #include "common/Error.h"
 
@@ -523,6 +524,9 @@ __forceinline void spu2Output(StereoOut32 out)
 	/* Some games pause voices with the volume left on leaving us with
      * significant DC offset, so we filter it out (e.x. SSX 3)*/
 	DCFilter(conv);
+
+	if (g_orbis_bootturbo_listen) [[unlikely]] // PS5SX2x6: the unthrottled arcade boot ends at the game's first sound
+		OrbisBootTurboNoteSample(conv[0], conv[1]);
 
 	s_current_chunk[s_current_chunk_pos++] = conv[0];
 	s_current_chunk[s_current_chunk_pos++] = conv[1];

@@ -11,6 +11,7 @@
 #include "ACATA_IO_CHD.h"
 
 #include <cstring>
+#include <vector>
 
 #if __POSIX__
 #define INVALID_HANDLE_VALUE -1
@@ -44,13 +45,30 @@ void ACATA::TH::IO_Read(u32* addr, u32 size) {
 			 size, (size2), sectorsize, nsector);
 	
 	if (isCHD) {
-		u32 scale = sectorsize / CHD.GetSectorSize();
-		u64 chd_lba = LBA * scale;
-		u32 chd_count = nsector * scale;
-		if (!CHD.ReadSectors(chd_lba, chd_count, (void*)addr)) {
-			Console.ErrorFmt("ACATA:IO_ReadCHD: lba:{} nsector:{} failed", chd_lba, chd_count);
-			pxAssert(false);
-			abort();
+		const u32 cs = CHD.GetSectorSize();
+		if (sectorsize >= cs) {
+			u32 scale = sectorsize / cs;
+			u64 chd_lba = LBA * scale;
+			u32 chd_count = nsector * scale;
+			if (!CHD.ReadSectors(chd_lba, chd_count, (void*)addr)) {
+				Console.ErrorFmt("ACATA:IO_ReadCHD: lba:{} nsector:{} failed", chd_lba, chd_count);
+				pxAssert(false);
+				abort();
+			}
+		} else {
+			// 512-byte ATA sectors from a CHD with bigger units: an HDD image packed as a MODE1 CD CHD
+			// (2048-byte units). The integer scale above was 0 here, so nothing was read at all.
+			static std::vector<u8> tmp;
+			const u64 byte0 = static_cast<u64>(LBA) * sectorsize;
+			const u64 bytes = static_cast<u64>(nsector) * sectorsize;
+			const u64 first = byte0 / cs, last = (byte0 + bytes + cs - 1) / cs;
+			tmp.resize(static_cast<size_t>((last - first) * cs));
+			if (!CHD.ReadSectors(first, static_cast<u32>(last - first), tmp.data())) {
+				Console.ErrorFmt("ACATA:IO_ReadCHD: lba:{} nsector:{} ({}-byte units {}..{}) failed", LBA, nsector, cs, first, last);
+				pxAssert(false);
+				abort();
+			}
+			std::memcpy(addr, tmp.data() + (byte0 - first * cs), static_cast<size_t>(bytes));
 		}
 
 	} else {

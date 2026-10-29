@@ -15,8 +15,8 @@ Played on a PS5 so far:
 - **Wangan Midnight** (NM00008): picture, sound and controls.
 - **Soul Calibur II** (NM00007), Conquest mode included, with a Conquest card made by
   [SC2MAKER](https://github.com/israpps/SC2MAKER).
-- **Battle Gear 3** (NM00010): the game runs. It keeps no player data without NESYS, its online service,
-  which isn't emulated yet.
+- **Battle Gear 3** (NM00010), with its Entry Key and, through a NESYS server of your own, player data,
+  Time Attack ghosts and ranking (see [Battle Gear 3](#battle-gear-3-entry-key-and-nesys)).
 
 ### What this fork adds to PS5SX2
 
@@ -34,6 +34,8 @@ Played on a PS5 so far:
   - the SRAM saved while the game runs and when you leave it (before, only at shutdown, which the PS5
     app never reaches);
   - no PS2 checksum written into a card without the PS2 file system (the Conquest card).
+- **Battle Gear 3's Entry Key** on the Taito I/O board, and the **USB-ET/TX (Pegasus) Ethernet adapter**
+  its NESYS uses, on PCSX2's DEV9 sockets.
 - **`bootturbo`**: an arcade game boots without the frame limiter (Wangan Midnight's boot is about 18 s
   at full speed). Switches below.
 
@@ -75,6 +77,26 @@ No BIOS, dongle, game or artwork is included.
 
 PS5SX2's other flags work as in PS5SX2.
 
+### Battle Gear 3: Entry Key and NESYS
+
+- **Entry Key**: the key lives in `bg3key.bin` next to the game's `sram.bin`
+  (`/data/PCSX2x6/games/NM00010/bg3key.bin`, 180 bytes: serial, data blocks, EEPROM). Without one the
+  emulator makes a new key, Key ID `ML0001`, the first time the game reads it. The key sensor (inserting
+  the key) is on **Cross**. Each key is one player: keep a copy of a key file to keep that player.
+- **NESYS**: the game's network goes through an emulated I-O DATA USB-ET/TX adapter, which the emulator
+  plugs in for Battle Gear 3 by itself. NESYS needs a server on your network; **no server is included**.
+  Point the game at it with a line in the game's settings file (`/data/PCSX2x6/settings/NM00010.ini`, named like
+  the `.acgame`; the shelf's settings sheet makes it):
+  ```
+  PS5SX2x6/BG3Server=192.168.1.8
+  ```
+  (your server PC's address). With it, `bg3.betson.com` resolves to that address and the game's vendor ID
+  check (telnet to its router, `192.168.1.1:23`) goes to port 23 on the same PC. The server answers
+  `POST /hulk_hogan/cgi-bin/bg3sv.cgi` on port 80. Without the setting the adapter still works, but the
+  game reaches nothing.
+- **Battle Gear 3 Tuned** (NM00015) gets the key and the adapter too, but hasn't been tried; its NESYS
+  differs (another server name, CGI and router).
+
 ### Controls
 
 **Shelf**: D-pad left / right browse (L1 / R1 a page at a time), Cross or Options plays, Square opens
@@ -101,7 +123,7 @@ Each game's Controls page has its exact buttons.
 
 - **Player 1 only:** one DualSense drives the JVS board.
 - **No crosshair or touch pointer** is drawn on the screen yet (gun and touch panel games).
-- **No NESYS:** Battle Gear 3 keeps no player data.
+- **Battle Gear 3's NESYS needs your own server**: none comes with the emulator.
 - **No force feedback** on the DualSense yet.
 - Most games haven't been tried on a PS5: the list at the top is all that has.
 

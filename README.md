@@ -91,11 +91,14 @@ PS5SX2's other flags work as in PS5SX2.
   PS5SX2x6/BG3Server=192.168.1.8
   ```
   (your server PC's address). With it, `bg3.betson.com` resolves to that address and the game's vendor ID
-  check (telnet to its router, `192.168.1.1:23`) goes to port 23 on the same PC. The server answers
+  check (telnet to its router, `192.168.1.1:23`, or wherever the game telnets) goes to port 23 on the same PC. The server answers
   `POST /hulk_hogan/cgi-bin/bg3sv.cgi` on port 80. Without the setting the adapter still works, but the
   game reaches nothing.
-- **Battle Gear 3 Tuned** (NM00015) gets the key and the adapter too, but hasn't been tried; its NESYS
-  differs (another server name, CGI and router).
+- **Battle Gear 3 Tuned** (NM00015, 2.05J) gets the key and the adapter too, with the same setting (in
+  `settings/NM00015.ini`). Its NESYS differs: it asks `cc3urijnamag.battlegear.net`, telnets to a YAMAHA
+  router at `192.168.0.1:23` (`show config pp 1`, vendor ID after `pp auth myname`) and posts to
+  `/giant_baba/cgi-bin/bg35sv.cgi` with a 0x28-byte header. Played on a PS5 with a server: player data,
+  Time Attack ghosts and ranking.
 
 ### Controls
 

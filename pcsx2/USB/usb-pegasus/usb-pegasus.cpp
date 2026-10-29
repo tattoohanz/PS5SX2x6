@@ -14,7 +14,7 @@
 // The network behind it is PCSX2's sockets adapter (DEV9/sockets.cpp), as the PS2's own adapter uses on the PS5: its DHCP
 // gives 192.0.2.100 (gateway and DNS 192.0.2.1), its DNS answers the hosts of DEV9/Eth (EmuConfig.DEV9.EthHosts) and
 // forwards the rest; TCP and UDP go out through the console's sockets. PS5SX2x6/BG3Server = a.b.c.d in the game's
-// settings adds bg3.betson.com -> a.b.c.d to those hosts.
+// settings adds bg3.betson.com and cc3urijnamag.battlegear.net -> a.b.c.d to those hosts.
 
 #include "USB/usb-pegasus/usb-pegasus.h"
 #include "USB/qemu-usb/qusb.h"
@@ -89,8 +89,10 @@ namespace usb_pegasus
 		u32 tx_logged = 0;
 		u32 rx_logged = 0;
 		std::array<u8, 6> mac{};
-		bool redirect = false;   // 192.168.1.1:23 (the DrayTek's telnet) <-> server:23
+		bool redirect = false;   // router:23 (the router's telnet) <-> server:23
 		std::array<u8, 4> server{};
+		std::array<u8, 4> router{}; // the address the game telnets to (BG3: 192.168.1.1), learnt from its first SYN
+		bool router_known = false;
 		std::unique_ptr<PegasusNet> net;
 	};
 
@@ -222,12 +224,13 @@ namespace usb_pegasus
 		return static_cast<u16>(~sum);
 	}
 
-	// BG3 logs in to its router (192.168.1.1, a DrayTek Vigor2200x) by telnet for the vendor ID; send that to the server.
-	// tx: the game's TCP to 192.168.1.1:23 goes to server:23. rx: the server's TCP from :23 comes back as 192.168.1.1.
-	// Rewrites the address and both checksums. Needs proper testing.
+	// BG3 logs in to its router by telnet for the vendor ID (BG3: 192.168.1.1, a DrayTek Vigor2200x; BG3 Tuned 2.05J:
+	// a YAMAHA RTA55i); send that to the server. tx: the game's TCP to router:23 goes to server:23 (the router is the
+	// first address the game telnets to); rx: the server's TCP from :23 comes back as the router.
+	// Rewrites the address and both checksums.
 	static void RedirectTelnet(PegasusState* s, u8* f, size_t n, bool tx)
 	{
-		static constexpr u8 router[4] = {192, 168, 1, 1};
+		const u8* router = s->router.data();
 		if (!s->redirect || n < 34 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 6)
 			return;
 		const size_t ihl = static_cast<size_t>(f[14] & 0x0F) * 4;
@@ -239,14 +242,23 @@ namespace usb_pegasus
 		u8* addr;
 		if (tx)
 		{
-			if (std::memcmp(ip + 16, router, 4) != 0 || ((tcp[2] << 8) | tcp[3]) != 23)
+			if (((tcp[2] << 8) | tcp[3]) != 23 || std::memcmp(ip + 16, s->server.data(), 4) == 0)
+				return;
+			if (!s->router_known)
+			{
+				std::memcpy(s->router.data(), ip + 16, 4);
+				s->router_known = true;
+				Console.WriteLn("PEGASUS: telnet to %u.%u.%u.%u:23 (the router's vendor ID) goes to %u.%u.%u.%u:23",
+					ip[16], ip[17], ip[18], ip[19], s->server[0], s->server[1], s->server[2], s->server[3]);
+			}
+			if (std::memcmp(ip + 16, router, 4) != 0)
 				return;
 			addr = ip + 16;
 			std::memcpy(addr, s->server.data(), 4);
 		}
 		else
 		{
-			if (std::memcmp(ip + 12, s->server.data(), 4) != 0 || ((tcp[0] << 8) | tcp[1]) != 23)
+			if (!s->router_known || std::memcmp(ip + 12, s->server.data(), 4) != 0 || ((tcp[0] << 8) | tcp[1]) != 23)
 				return;
 			addr = ip + 12;
 			std::memcpy(addr, router, 4);
@@ -404,18 +416,23 @@ namespace usb_pegasus
 			}
 			if (ok)
 			{
-				e.Url = "bg3.betson.com";
-				e.Desc = "Battle Gear 3 NESYS";
-				e.Enabled = true;
 				s->redirect = true;
 				std::memcpy(s->server.data(), e.Address, 4);
-				Console.WriteLn("PEGASUS: telnet to 192.168.1.1:23 (the router's vendor ID) goes to %s:23", server.c_str());
+				// BG3 (export): bg3.betson.com; BG3 Tuned 2.05J: cc3urijnamag.battlegear.net.
+				static constexpr const char* names[] = {"bg3.betson.com", "cc3urijnamag.battlegear.net"};
 				auto& hosts = EmuConfig.DEV9.EthHosts;
-				hosts.erase(std::remove_if(hosts.begin(), hosts.end(), [](const auto& h) { return h.Url == "bg3.betson.com"; }), hosts.end());
-				hosts.push_back(e);
+				for (const char* name : names)
+				{
+					hosts.erase(std::remove_if(hosts.begin(), hosts.end(), [name](const auto& h) { return h.Url == name; }), hosts.end());
+					e.Url = name;
+					e.Desc = "Battle Gear 3 NESYS";
+					e.Enabled = true;
+					hosts.push_back(e);
+					Console.WriteLn("PEGASUS: %s -> %s (PS5SX2x6/BG3Server)", name, server.c_str());
+				}
 				// Hand out the internal DNS (192.0.2.1): it answers the hosts above and forwards the rest.
 				EmuConfig.DEV9.ModeDNS1 = Pcsx2Config::DEV9Options::DnsMode::Internal;
-				Console.WriteLn("PEGASUS: bg3.betson.com -> %s (PS5SX2x6/BG3Server)", server.c_str());
+				Console.WriteLn("PEGASUS: telnet to port 23 (the router's vendor ID) goes to %s:23", server.c_str());
 			}
 			else
 				Console.Error("PEGASUS: PS5SX2x6/BG3Server \"%s\" is not an IPv4 address", server.c_str());

@@ -88,9 +88,9 @@ PS5SX2's other flags work as in PS5SX2.
   Point the game at it with a line in the game's settings file (`/data/PCSX2x6/settings/NM00010.ini`, named like
   the `.acgame`; the shelf's settings sheet makes it):
   ```
-  PS5SX2x6/BG3Server=192.168.1.8
+  Arcade/NESYSServer=192.168.1.8
   ```
-  (your server PC's address). With it, `bg3.betson.com` resolves to that address and the game's vendor ID
+  (your server PC's address; the older `PS5SX2x6/BG3Server` line still works). With it, `bg3.betson.com` resolves to that address and the game's vendor ID
   check (telnet to its router, `192.168.1.1:23`, or wherever the game telnets) goes to port 23 on the same PC. The server answers
   `POST /hulk_hogan/cgi-bin/bg3sv.cgi` on port 80. Without the setting the adapter still works, but the
   game reaches nothing.

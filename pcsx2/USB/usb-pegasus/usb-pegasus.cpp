@@ -13,7 +13,7 @@
 //    LANEGG takes count-8 as the frame length.
 // The network behind it is PCSX2's sockets adapter (DEV9/sockets.cpp), as the PS2's own adapter uses on the PS5: its DHCP
 // gives 192.0.2.100 (gateway and DNS 192.0.2.1), its DNS answers the hosts of DEV9/Eth (EmuConfig.DEV9.EthHosts) and
-// forwards the rest; TCP and UDP go out through the console's sockets. PS5SX2x6/BG3Server = a.b.c.d in the game's
+// forwards the rest; TCP and UDP go out through the console's sockets. Arcade/NESYSServer = a.b.c.d in the game's
 // settings adds bg3.betson.com and cc3urijnamag.battlegear.net -> a.b.c.d to those hosts.
 
 #include "USB/usb-pegasus/usb-pegasus.h"
@@ -400,8 +400,11 @@ namespace usb_pegasus
 	USBDevice* PegasusDevice::CreateDevice(SettingsInterface& si, u32 port, u32 subtype) const
 	{
 		PegasusState* s = new PegasusState();
-		// bg3.betson.com -> PS5SX2x6/BG3Server, for the DNS server of the sockets adapter (it loads the hosts when made).
-		const std::string server = si.GetStringValue("PS5SX2x6", "BG3Server", "");
+		// bg3.betson.com -> Arcade/NESYSServer, for the DNS server of the sockets adapter (it loads the hosts when made).
+		// Arcade/NESYSServer; PS5SX2x6/BG3Server is its old name, still read when the new one is missing.
+		std::string server = si.GetStringValue("Arcade", "NESYSServer", "");
+		if (server.empty())
+			server = si.GetStringValue("PS5SX2x6", "BG3Server", "");
 		if (!server.empty())
 		{
 			std::vector<std::string_view> parts = StringUtil::SplitString(server, '.', false);
@@ -428,17 +431,17 @@ namespace usb_pegasus
 					e.Desc = "Battle Gear 3 NESYS";
 					e.Enabled = true;
 					hosts.push_back(e);
-					Console.WriteLn("PEGASUS: %s -> %s (PS5SX2x6/BG3Server)", name, server.c_str());
+					Console.WriteLn("PEGASUS: %s -> %s (Arcade/NESYSServer)", name, server.c_str());
 				}
 				// Hand out the internal DNS (192.0.2.1): it answers the hosts above and forwards the rest.
 				EmuConfig.DEV9.ModeDNS1 = Pcsx2Config::DEV9Options::DnsMode::Internal;
 				Console.WriteLn("PEGASUS: telnet to port 23 (the router's vendor ID) goes to %s:23", server.c_str());
 			}
 			else
-				Console.Error("PEGASUS: PS5SX2x6/BG3Server \"%s\" is not an IPv4 address", server.c_str());
+				Console.Error("PEGASUS: Arcade/NESYSServer \"%s\" is not an IPv4 address", server.c_str());
 		}
 		else
-			Console.Warning("PEGASUS: no PS5SX2x6/BG3Server: bg3.betson.com goes to the real DNS");
+			Console.Warning("PEGASUS: no Arcade/NESYSServer: the NESYS server names go to the real DNS");
 		// The PS2's own network adapter may be off (the flag nonetwork leaves DEV9/Eth/EthDevice empty); this one is a
 		// different card, so with no adapter named it takes the console's network as "Auto" does. EthEnable stays as it is.
 		if (EmuConfig.DEV9.EthDevice.empty())

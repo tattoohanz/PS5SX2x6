@@ -1305,6 +1305,55 @@ namespace R3000A
 		}
 	} // namespace intrman
 
+	// Log only: the iLINK socket calls of the System 246 link (Wangan Midnight R's VS), as ILSAMPLE makes them
+	// for the EE's sceILsock* RPCs. Arguments at entry; data and addresses as hex. Nothing is changed.
+	namespace ilsocket
+	{
+		static u32 s_calls[16];
+
+		static bool ilLogThis(int fn)
+		{
+			const u32 n = ++s_calls[fn & 15];
+			return n <= 200 || (n % 600) == 0;
+		}
+
+		static std::string ilHex(u32 addr, u32 len, u32 max = 64)
+		{
+			std::string out;
+			const u32 n = std::min(len, max);
+			out.reserve(n * 2 + 4);
+			for (u32 i = 0; i < n; i++)
+			{
+				static const char digits[] = "0123456789abcdef";
+				const u8 b = iopMemRead8(addr + i);
+				out += digits[b >> 4];
+				out += digits[b & 15];
+			}
+			if (len > max)
+				out += "..";
+			return out;
+		}
+
+		static u32 ilArg(int k) { return iopMemRead32(sp + 0x10 + 4 * (k - 4)); }
+
+		void Init_DEBUG() { if (ilLogThis(4)) Console.WriteLn("[ilink] Init (%x, %x)", a0, a1); }
+		void Reset_DEBUG() { if (ilLogThis(5)) Console.WriteLn("[ilink] Reset"); }
+		void Open_DEBUG() { if (ilLogThis(8)) Console.WriteLn("[ilink] Open domain=%d type=%d protocol=%d", a0, a1, a2); }
+		void Close_DEBUG() { if (ilLogThis(9)) Console.WriteLn("[ilink] Close s=%d", a0); }
+		void Bind_DEBUG() { if (ilLogThis(10)) Console.WriteLn("[ilink] Bind s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
+		void Connect_DEBUG() { if (ilLogThis(11)) Console.WriteLn("[ilink] Connect s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
+		void Send_DEBUG() { if (ilLogThis(12)) Console.WriteLn("[ilink] Send #%u s=%d len=%d flags=%x data=%s", s_calls[12], a0, a2, a3, ilHex(a1, a2).c_str()); }
+		void SendTo_DEBUG() { if (ilLogThis(13)) Console.WriteLn("[ilink] SendTo #%u s=%d len=%d flags=%x to=%s data=%s", s_calls[13], a0, a2, a3, ilHex(ilArg(4), ilArg(5)).c_str(), ilHex(a1, a2).c_str()); }
+		void Recv_DEBUG() { if (ilLogThis(14)) Console.WriteLn("[ilink] Recv #%u s=%d max=%d flags=%x", s_calls[14], a0, a2, a3); }
+		void RecvFrom_DEBUG() { if (ilLogThis(15)) Console.WriteLn("[ilink] RecvFrom #%u s=%d max=%d flags=%x", s_calls[15], a0, a2, a3); }
+	} // namespace ilsocket
+
+	namespace ilink
+	{
+		void Eui64_DEBUG() { Console.WriteLn("[ilink] sce1394 #27 (GUID) buf=%x", a0); }
+		void NodeId_DEBUG() { Console.WriteLn("[ilink] sce1394 #28 (NodeId)"); }
+	} // namespace ilink
+
 	namespace sifcmd
 	{
 		std::map<u32,std::string> rpcservice_map = {
@@ -1475,6 +1524,22 @@ namespace R3000A
 		END_MODULE
 		MODULE(sifcmd)
 			EXPORT_D( 17, sceSifRegisterRpc)
+		END_MODULE
+		MODULE(ilsocket)
+			EXPORT_D(  4, Init)
+			EXPORT_D(  5, Reset)
+			EXPORT_D(  8, Open)
+			EXPORT_D(  9, Close)
+			EXPORT_D( 10, Bind)
+			EXPORT_D( 11, Connect)
+			EXPORT_D( 12, Send)
+			EXPORT_D( 13, SendTo)
+			EXPORT_D( 14, Recv)
+			EXPORT_D( 15, RecvFrom)
+		END_MODULE
+		MODULE(ilink)
+			EXPORT_D( 27, Eui64)
+			EXPORT_D( 28, NodeId)
 		END_MODULE
 		// clang-format off
 

@@ -1336,22 +1336,98 @@ namespace R3000A
 
 		static u32 ilArg(int k) { return iopMemRead32(sp + 0x10 + 4 * (k - 4)); }
 
-		void Init_DEBUG() { if (ilLogThis(4)) Console.WriteLn("[ilink] Init (%x, %x)", a0, a1); }
-		void Reset_DEBUG() { if (ilLogThis(5)) Console.WriteLn("[ilink] Reset"); }
-		void Open_DEBUG() { if (ilLogThis(8)) Console.WriteLn("[ilink] Open domain=%d type=%d protocol=%d", a0, a1, a2); }
-		void Close_DEBUG() { if (ilLogThis(9)) Console.WriteLn("[ilink] Close s=%d", a0); }
-		void Bind_DEBUG() { if (ilLogThis(10)) Console.WriteLn("[ilink] Bind s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
-		void Connect_DEBUG() { if (ilLogThis(11)) Console.WriteLn("[ilink] Connect s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
-		void Send_DEBUG() { if (ilLogThis(12)) Console.WriteLn("[ilink] Send #%u s=%d len=%d flags=%x data=%s", s_calls[12], a0, a2, a3, ilHex(a1, a2).c_str()); }
-		void SendTo_DEBUG() { if (ilLogThis(13)) Console.WriteLn("[ilink] SendTo #%u s=%d len=%d flags=%x to=%s data=%s", s_calls[13], a0, a2, a3, ilHex(ilArg(4), ilArg(5)).c_str(), ilHex(a1, a2).c_str()); }
-		void Recv_DEBUG() { if (ilLogThis(14)) Console.WriteLn("[ilink] Recv #%u s=%d max=%d flags=%x", s_calls[14], a0, a2, a3); }
-		void RecvFrom_DEBUG() { if (ilLogThis(15)) Console.WriteLn("[ilink] RecvFrom #%u s=%d max=%d flags=%x", s_calls[15], a0, a2, a3); }
+		// Buffers the called function fills: dumped at the next iLINK call, after the function has run.
+		static u32 s_pendAddr[4], s_pendLen[4];
+		static const char* s_pendWhat[4];
+		static int s_pendCount;
+
+		static void ilDefer(const char* what, u32 addr, u32 len)
+		{
+			if (s_pendCount < 4)
+			{
+				s_pendWhat[s_pendCount] = what;
+				s_pendAddr[s_pendCount] = addr;
+				s_pendLen[s_pendCount] = len;
+				s_pendCount++;
+			}
+		}
+
+		static void ilFlush()
+		{
+			for (int i = 0; i < s_pendCount; i++)
+				Console.WriteLn("[ilink]   %s at %x after the call: %s", s_pendWhat[i], s_pendAddr[i], ilHex(s_pendAddr[i], s_pendLen[i]).c_str());
+			s_pendCount = 0;
+		}
+
+		// The whole packet, only when it differs from the last one on that socket.
+		static u8 s_lastSend[4][0x200];
+		static u32 s_lastLen[4];
+		static u32 s_sendChanges;
+
+		static void ilSendFull(u32 s, u32 addr, u32 len)
+		{
+			if (s >= 4 || s_sendChanges >= 300)
+				return;
+			const u32 n = std::min<u32>(len, 0x200);
+			int firstDiff = (n != s_lastLen[s]) ? 0 : -1;
+			for (u32 i = 0; i < n; i++)
+			{
+				const u8 b = iopMemRead8(addr + i);
+				if (firstDiff < 0 && b != s_lastSend[s][i])
+					firstDiff = static_cast<int>(i);
+				s_lastSend[s][i] = b;
+			}
+			s_lastLen[s] = n;
+			if (firstDiff < 0)
+				return;
+			s_sendChanges++;
+			Console.WriteLn("[ilink] Send packet changed #%u s=%d (call #%u, first diff at %x) full=%s", s_sendChanges, s, s_calls[12], firstDiff, ilHex(addr, n, 0x200).c_str());
+		}
+
+		void Init_DEBUG() { ilFlush(); if (ilLogThis(4)) Console.WriteLn("[ilink] Init (%x, %x)", a0, a1); }
+		void Reset_DEBUG() { ilFlush(); if (ilLogThis(5)) Console.WriteLn("[ilink] Reset"); }
+		void Open_DEBUG() { ilFlush(); if (ilLogThis(8)) Console.WriteLn("[ilink] Open domain=%d type=%d protocol=%d", a0, a1, a2); }
+		void Close_DEBUG() { ilFlush(); if (ilLogThis(9)) Console.WriteLn("[ilink] Close s=%d", a0); }
+		void Bind_DEBUG() { ilFlush(); if (ilLogThis(10)) Console.WriteLn("[ilink] Bind s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
+		void Connect_DEBUG() { ilFlush(); if (ilLogThis(11)) Console.WriteLn("[ilink] Connect s=%d addr=%s (len %d)", a0, ilHex(a1, a2).c_str(), a2); }
+		void Send_DEBUG()
+		{
+			ilFlush();
+			if (ilLogThis(12))
+				Console.WriteLn("[ilink] Send #%u s=%d len=%d flags=%x data=%s", s_calls[12], a0, a2, a3, ilHex(a1, a2).c_str());
+			ilSendFull(a0, a1, a2);
+		}
+		void SendTo_DEBUG() { ilFlush(); if (ilLogThis(13)) Console.WriteLn("[ilink] SendTo #%u s=%d len=%d flags=%x to=%s data=%s", s_calls[13], a0, a2, a3, ilHex(ilArg(4), ilArg(5)).c_str(), ilHex(a1, a2).c_str()); }
+		void Recv_DEBUG()
+		{
+			ilFlush();
+			if (ilLogThis(14))
+			{
+				Console.WriteLn("[ilink] Recv #%u s=%d buf=%x max=%d flags=%x", s_calls[14], a0, a1, a2, a3);
+				ilDefer("Recv data", a1, a2);
+			}
+		}
+		void RecvFrom_DEBUG()
+		{
+			ilFlush();
+			if (ilLogThis(15))
+			{
+				Console.WriteLn("[ilink] RecvFrom #%u s=%d buf=%x max=%d flags=%x from=%x", s_calls[15], a0, a1, a2, a3, ilArg(4));
+				ilDefer("RecvFrom data", a1, a2);
+				ilDefer("RecvFrom from", ilArg(4), 16);
+			}
+		}
 	} // namespace ilsocket
 
 	namespace ilink
 	{
-		void Eui64_DEBUG() { Console.WriteLn("[ilink] sce1394 #27 (GUID) buf=%x", a0); }
-		void NodeId_DEBUG() { Console.WriteLn("[ilink] sce1394 #28 (NodeId)"); }
+		void Eui64_DEBUG()
+		{
+			ilsocket::ilFlush();
+			Console.WriteLn("[ilink] sce1394 #27 (GUID) buf=%x", a0);
+			ilsocket::ilDefer("GUID", a0, 8);
+		}
+		void NodeId_DEBUG() { ilsocket::ilFlush(); Console.WriteLn("[ilink] sce1394 #28 (NodeId)"); }
 	} // namespace ilink
 
 	namespace sifcmd

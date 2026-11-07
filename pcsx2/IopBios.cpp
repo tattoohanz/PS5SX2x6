@@ -1547,6 +1547,14 @@ namespace R3000A
 					return;
 				}
 
+#ifdef _WIN32
+				WSADATA wsa;
+				if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+				{
+					Console.Error("[ilnet] WSAStartup failed, the link stays as it is");
+					return;
+				}
+#endif
 				s_udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 				if (s_udp == kNoSock)
 				{

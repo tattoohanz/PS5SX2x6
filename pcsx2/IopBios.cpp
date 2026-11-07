@@ -28,8 +28,14 @@
 
 #ifdef _WIN32
 #include <io.h>
+#include "common/RedtapeWindows.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #endif
 
 #if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
@@ -1066,6 +1072,8 @@ namespace R3000A
 		}
 	} // namespace sysmem
 
+	static u32 s_iopDelayThread;
+
 	namespace loadcore
 	{
 
@@ -1218,6 +1226,8 @@ namespace R3000A
 			if (modname == "thbase")
 			{
 				CurrentBiosInformation.iopThreadListAddr = GetThreadList(a0, version);
+				// thbase export 33, DelayThread: what the iLINK link's RecvFrom sleeps in while nothing has come.
+				s_iopDelayThread = iopMemRead32(a0 + 0x14 + 33 * 4);
 			}
 
 			CurrentBiosInformation.iopModListAddr = GetModList(a0);
@@ -1305,8 +1315,9 @@ namespace R3000A
 		}
 	} // namespace intrman
 
-	// Log only: the iLINK socket calls of the System 246 link (Wangan Midnight R's VS), as ILSAMPLE makes them
-	// for the EE's sceILsock* RPCs. Arguments at entry; data and addresses as hex. Nothing is changed.
+	// The iLINK socket calls of the System 246 link (Wangan Midnight R's VS), as ILSAMPLE makes them for the EE's
+	// sceILsock* RPCs: logged at entry (arguments, data and addresses as hex), and, with <data>/ilink.ini, carried over
+	// UDP to one other machine (ilnet below). Without ilink.ini nothing is changed.
 	namespace ilsocket
 	{
 		static u32 s_calls[16];
@@ -1398,8 +1409,12 @@ namespace R3000A
 			ilSendFull(a0, a1, a2);
 		}
 		void SendTo_DEBUG() { ilFlush(); if (ilLogThis(13)) Console.WriteLn("[ilink] SendTo #%u s=%d len=%d flags=%x to=%s data=%s", s_calls[13], a0, a2, a3, ilHex(ilArg(4), ilArg(5)).c_str(), ilHex(a1, a2).c_str()); }
+		static bool ilIsRetry(int fn);
+
 		void Recv_DEBUG()
 		{
+			if (ilIsRetry(14))
+				return;
 			ilFlush();
 			if (ilLogThis(14))
 			{
@@ -1409,6 +1424,8 @@ namespace R3000A
 		}
 		void RecvFrom_DEBUG()
 		{
+			if (ilIsRetry(15))
+				return;
 			ilFlush();
 			if (ilLogThis(15))
 			{
@@ -1417,10 +1434,403 @@ namespace R3000A
 				ilDefer("RecvFrom from", ilArg(4), 16);
 			}
 		}
+
+		// ---- ilnet: the link over UDP ----
+		// <data>/ilink.ini (one "key = value" per line, # comments):
+		//   peer = 192.168.1.20   the other machine's IP (required)
+		//   port = 24680          UDP port, the same on both machines (default 24680)
+		//   node = 1              1 on one machine, 2 on the other (default 1)
+		//   guid = 074600086af2ff01   optional: the 8 bytes sce1394 GUID gives, in memory order
+		// Datagram: "IL1\0", source GUID (8), destination EUI64 (8), destination port (2), source port (2), data.
+		// Ports and EUI64s are the bytes of the game's 16-byte addresses (10 3c <port:2> <eui64:8> 00000000).
+		namespace ilnet
+		{
+#ifdef _WIN32
+			using sock_t = SOCKET;
+			static constexpr sock_t kNoSock = INVALID_SOCKET;
+			static void sockClose(sock_t s) { closesocket(s); }
+#else
+			using sock_t = int;
+			static constexpr sock_t kNoSock = -1;
+			static void sockClose(sock_t s) { close(s); }
+#endif
+			static constexpr u32 kMaxData = 0x200;
+			static constexpr int kSockets = 8;
+
+			struct Packet
+			{
+				u8 srcGuid[8];
+				u8 srcPort[2];
+				u32 len;
+				u8 data[kMaxData];
+			};
+
+			struct ILSock
+			{
+				u8 port[2]; // bound
+				u8 peerEui[8]; // connected
+				u8 peerPort[2];
+				bool connected;
+				std::vector<Packet> queue;
+			};
+
+			static bool s_loaded, s_enabled;
+			static sock_t s_udp = kNoSock;
+			static sockaddr_in s_peer;
+			static u8 s_guid[8] = {0x07, 0x46, 0x00, 0x08, 0x6a, 0xf2, 0xff, 0x01};
+			static int s_node = 1;
+			static ILSock s_socks[kSockets];
+			static u32 s_rxCount, s_txCount, s_dropCount;
+
+			static std::string trim(std::string v)
+			{
+				while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r' || v.back() == '\n'))
+					v.pop_back();
+				size_t i = 0;
+				while (i < v.size() && (v[i] == ' ' || v[i] == '\t'))
+					i++;
+				return v.substr(i);
+			}
+
+			static void load()
+			{
+				if (s_loaded)
+					return;
+				s_loaded = true;
+				const std::string path = Path::Combine(EmuFolders::DataRoot, "ilink.ini");
+				std::FILE* f = std::fopen(path.c_str(), "r");
+				if (!f)
+				{
+					Console.WriteLn("[ilnet] no %s: the link stays as it is (log only)", path.c_str());
+					return;
+				}
+				std::string peer;
+				int port = 24680;
+				bool guidSet = false;
+				char line[256];
+				while (std::fgets(line, sizeof(line), f))
+				{
+					std::string l = line;
+					const size_t hash = l.find('#');
+					if (hash != std::string::npos)
+						l.resize(hash);
+					const size_t eq = l.find('=');
+					if (eq == std::string::npos)
+						continue;
+					const std::string key = trim(l.substr(0, eq));
+					const std::string val = trim(l.substr(eq + 1));
+					if (key == "peer")
+						peer = val;
+					else if (key == "port")
+						port = std::atoi(val.c_str());
+					else if (key == "node")
+						s_node = std::atoi(val.c_str());
+					else if (key == "guid" && val.size() == 16)
+					{
+						for (int i = 0; i < 8; i++)
+							s_guid[i] = static_cast<u8>(std::strtoul(val.substr(i * 2, 2).c_str(), nullptr, 16));
+						guidSet = true;
+					}
+				}
+				std::fclose(f);
+				if (s_node < 1 || s_node > 63)
+					s_node = 1;
+				if (!guidSet)
+					s_guid[7] = static_cast<u8>(s_node);
+
+				s_peer = {};
+				s_peer.sin_family = AF_INET;
+				s_peer.sin_port = htons(static_cast<u16>(port));
+				if (peer.empty() || inet_pton(AF_INET, peer.c_str(), &s_peer.sin_addr) != 1)
+				{
+					Console.Error("[ilnet] %s: no valid \"peer = <IP>\", the link stays as it is", path.c_str());
+					return;
+				}
+
+				s_udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				if (s_udp == kNoSock)
+				{
+					Console.Error("[ilnet] socket() failed (%d), the link stays as it is", errno);
+					return;
+				}
+				int one = 1;
+				setsockopt(s_udp, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+				sockaddr_in local = {};
+				local.sin_family = AF_INET;
+				local.sin_addr.s_addr = htonl(INADDR_ANY);
+				local.sin_port = htons(static_cast<u16>(port));
+				if (bind(s_udp, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) != 0)
+				{
+					Console.Error("[ilnet] bind to UDP port %d failed (%d), the link stays as it is", port, errno);
+					sockClose(s_udp);
+					s_udp = kNoSock;
+					return;
+				}
+#ifdef _WIN32
+				u_long nb = 1;
+				ioctlsocket(s_udp, FIONBIO, &nb);
+#else
+				fcntl(s_udp, F_SETFL, fcntl(s_udp, F_GETFL, 0) | O_NONBLOCK);
+#endif
+				s_enabled = true;
+				Console.WriteLn("[ilnet] on: UDP port %d, peer %s:%d, node %d, GUID %02x%02x%02x%02x%02x%02x%02x%02x, NodeId %x, DelayThread %x",
+					port, peer.c_str(), port, s_node, s_guid[0], s_guid[1], s_guid[2], s_guid[3], s_guid[4], s_guid[5], s_guid[6],
+					s_guid[7], 0xffc0 | (s_node - 1), s_iopDelayThread);
+			}
+
+			static bool eq2(const u8* a, const u8* b) { return a[0] == b[0] && a[1] == b[1]; }
+
+			// Everything waiting on the UDP socket, into the queues of the sockets bound to its destination port.
+			static void poll()
+			{
+				u8 dg[24 + kMaxData];
+				for (;;)
+				{
+					sockaddr_in from = {};
+					socklen_t fromLen = sizeof(from);
+					const int n = static_cast<int>(recvfrom(s_udp, reinterpret_cast<char*>(dg), sizeof(dg), 0,
+						reinterpret_cast<sockaddr*>(&from), &fromLen));
+					if (n < 0)
+						return;
+					if (n < 24 || std::memcmp(dg, "IL1", 4) != 0 || std::memcmp(dg + 4, s_guid, 8) == 0)
+					{
+						s_dropCount++;
+						continue;
+					}
+					const u8* dstEui = dg + 12;
+					const u8* dstPort = dg + 20;
+					bool forMe = true;
+					for (int i = 0; i < 8; i++)
+						forMe = forMe && (dstEui[i] == 0xff || dstEui[i] == s_guid[i]);
+					bool queued = false;
+					for (ILSock& k : s_socks)
+					{
+						if (!eq2(k.port, dstPort) || (dstPort[0] == 0 && dstPort[1] == 0))
+							continue;
+						if (k.queue.size() >= 64)
+							k.queue.erase(k.queue.begin());
+						Packet p;
+						std::memcpy(p.srcGuid, dg + 4, 8);
+						std::memcpy(p.srcPort, dg + 22, 2);
+						p.len = static_cast<u32>(n - 24);
+						std::memcpy(p.data, dg + 24, p.len);
+						k.queue.push_back(p);
+						queued = true;
+						break;
+					}
+					s_rxCount++;
+					if (s_rxCount <= 20 || (s_rxCount % 600) == 0)
+					{
+						char ip[INET_ADDRSTRLEN] = "?";
+						inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+						Console.WriteLn("[ilnet] rx #%u %u bytes from %s to port %02x%02x eui %s%s", s_rxCount, n - 24, ip,
+							dstPort[0], dstPort[1], forMe ? "ok" : "other", queued ? "" : " (no socket on that port, dropped)");
+					}
+				}
+			}
+
+			static void send(u32 s, const u8* dstEui, const u8* dstPort, u32 buf, u32 len)
+			{
+				u8 dg[24 + kMaxData];
+				len = std::min(len, kMaxData);
+				std::memcpy(dg, "IL1", 4);
+				std::memcpy(dg + 4, s_guid, 8);
+				std::memcpy(dg + 12, dstEui, 8);
+				std::memcpy(dg + 20, dstPort, 2);
+				std::memcpy(dg + 22, s_socks[s].port, 2);
+				for (u32 i = 0; i < len; i++)
+					dg[24 + i] = iopMemRead8(buf + i);
+				const int r = static_cast<int>(sendto(s_udp, reinterpret_cast<const char*>(dg), 24 + len, 0,
+					reinterpret_cast<const sockaddr*>(&s_peer), sizeof(s_peer)));
+				s_txCount++;
+				if (s_txCount <= 5 || (s_txCount % 600) == 0 || r < 0)
+					Console.WriteLn("[ilnet] tx #%u s=%u %u bytes to port %02x%02x -> %d", s_txCount, s, len, dstPort[0], dstPort[1], r);
+			}
+
+			// A Recv/RecvFrom with nothing to give: the calling thread sleeps 1 ms in thbase's DelayThread, which
+			// returns to the jal of the import stub, so the call is made again with the arguments saved here.
+			struct Pending
+			{
+				bool active;
+				u32 retAddr;
+				u32 args[6];
+			};
+			static Pending s_pend[16];
+
+			static bool takeArgs(int fn, u32* args, int count)
+			{
+				Pending& p = s_pend[fn];
+				if (p.active && p.retAddr == ra)
+				{
+					std::memcpy(args, p.args, sizeof(u32) * count);
+					return true;
+				}
+				p.active = false;
+				args[0] = a0;
+				args[1] = a1;
+				args[2] = a2;
+				args[3] = a3;
+				if (count > 4)
+					args[4] = ilArg(4);
+				if (count > 5)
+					args[5] = ilArg(5);
+				return false;
+			}
+
+			static int sleepAndRetry(int fn, const u32* args, int count)
+			{
+				if (!s_iopDelayThread)
+				{
+					// No DelayThread known: say "nothing" (0 bytes) rather than spin.
+					s_pend[fn].active = false;
+					v0 = 0;
+					pc = ra;
+					return 1;
+				}
+				Pending& p = s_pend[fn];
+				p.active = true;
+				p.retAddr = ra;
+				std::memcpy(p.args, args, sizeof(u32) * count);
+				ra = ra - 8; // the jal into the import stub
+				a0 = 1000;
+				pc = s_iopDelayThread;
+				return 1;
+			}
+		} // namespace ilnet
+
+		static bool ilIsRetry(int fn) { return ilnet::s_pend[fn].active && ilnet::s_pend[fn].retAddr == ra; }
+
+		int Init_HLE()
+		{
+			ilnet::load();
+			if (ilnet::s_enabled)
+			{
+				for (ilnet::ILSock& k : ilnet::s_socks)
+					k = {};
+				for (ilnet::Pending& p : ilnet::s_pend)
+					p = {};
+			}
+			return 0; // ILSOCK's own Init runs too
+		}
+
+		int Bind_HLE()
+		{
+			ilnet::load();
+			if (ilnet::s_enabled && a0 < ilnet::kSockets && a2 >= 4)
+			{
+				ilnet::s_socks[a0].port[0] = iopMemRead8(a1 + 2);
+				ilnet::s_socks[a0].port[1] = iopMemRead8(a1 + 3);
+			}
+			return 0; // and ILSOCK's Bind
+		}
+
+		int Connect_HLE()
+		{
+			ilnet::load();
+			if (ilnet::s_enabled && a0 < ilnet::kSockets && a2 >= 12)
+			{
+				ilnet::ILSock& k = ilnet::s_socks[a0];
+				k.peerPort[0] = iopMemRead8(a1 + 2);
+				k.peerPort[1] = iopMemRead8(a1 + 3);
+				for (int i = 0; i < 8; i++)
+					k.peerEui[i] = iopMemRead8(a1 + 4 + i);
+				k.connected = true;
+			}
+			return 0; // and ILSOCK's Connect
+		}
+
+		int Send_HLE()
+		{
+			if (!ilnet::s_enabled || a0 >= ilnet::kSockets)
+				return 0;
+			ilnet::ILSock& k = ilnet::s_socks[a0];
+			if (!k.connected)
+				return 0;
+			ilnet::send(a0, k.peerEui, k.peerPort, a1, a2);
+			v0 = a2;
+			pc = ra;
+			return 1;
+		}
+
+		int SendTo_HLE()
+		{
+			if (!ilnet::s_enabled || a0 >= ilnet::kSockets)
+				return 0;
+			const u32 to = ilArg(4);
+			u8 eui[8], port[2];
+			port[0] = iopMemRead8(to + 2);
+			port[1] = iopMemRead8(to + 3);
+			for (int i = 0; i < 8; i++)
+				eui[i] = iopMemRead8(to + 4 + i);
+			ilnet::send(a0, eui, port, a1, a2);
+			v0 = a2;
+			pc = ra;
+			return 1;
+		}
+
+		static int ilReceive(int fn, bool withFrom)
+		{
+			if (!ilnet::s_enabled)
+				return 0;
+			u32 args[6];
+			ilnet::takeArgs(fn, args, withFrom ? 6 : 4);
+			const u32 s = args[0], buf = args[1], max = args[2];
+			if (s >= ilnet::kSockets)
+				return 0;
+			ilnet::poll();
+			ilnet::ILSock& k = ilnet::s_socks[s];
+			if (k.queue.empty())
+				return ilnet::sleepAndRetry(fn, args, withFrom ? 6 : 4);
+
+			ilnet::s_pend[fn].active = false;
+			const ilnet::Packet p = k.queue.front();
+			k.queue.erase(k.queue.begin());
+			const u32 n = std::min(p.len, max);
+			for (u32 i = 0; i < n; i++)
+				iopMemWrite8(buf + i, p.data[i]);
+			if (withFrom && args[4])
+			{
+				const u32 from = args[4];
+				const u8 addr[16] = {0x10, 0x3c, p.srcPort[0], p.srcPort[1], p.srcGuid[0], p.srcGuid[1], p.srcGuid[2],
+					p.srcGuid[3], p.srcGuid[4], p.srcGuid[5], p.srcGuid[6], p.srcGuid[7], 0, 0, 0, 0};
+				for (int i = 0; i < 16; i++)
+					iopMemWrite8(from + i, addr[i]);
+				if (args[5])
+					iopMemWrite32(args[5], 16);
+			}
+			v0 = n;
+			pc = ra;
+			return 1;
+		}
+
+		int Recv_HLE() { return ilReceive(14, false); }
+		int RecvFrom_HLE() { return ilReceive(15, true); }
 	} // namespace ilsocket
 
 	namespace ilink
 	{
+		int Eui64_HLE()
+		{
+			ilsocket::ilnet::load();
+			if (!ilsocket::ilnet::s_enabled || !a0)
+				return 0;
+			for (int i = 0; i < 8; i++)
+				iopMemWrite8(a0 + i, ilsocket::ilnet::s_guid[i]);
+			v0 = 0;
+			pc = ra;
+			return 1;
+		}
+
+		int NodeId_HLE()
+		{
+			ilsocket::ilnet::load();
+			if (!ilsocket::ilnet::s_enabled)
+				return 0;
+			v0 = 0xffc0 | (ilsocket::ilnet::s_node - 1);
+			pc = ra;
+			return 1;
+		}
+
 		void Eui64_DEBUG()
 		{
 			ilsocket::ilFlush();
@@ -1556,6 +1966,19 @@ namespace R3000A
 		MODULE(thbase)
 			EXPORT_H(  4, CreateThread)
 			EXPORT_H(  6, StartThread)
+		END_MODULE
+		MODULE(ilsocket)
+			EXPORT_H(  4, Init)
+			EXPORT_H( 10, Bind)
+			EXPORT_H( 11, Connect)
+			EXPORT_H( 12, Send)
+			EXPORT_H( 13, SendTo)
+			EXPORT_H( 14, Recv)
+			EXPORT_H( 15, RecvFrom)
+		END_MODULE
+		MODULE(ilink)
+			EXPORT_H( 27, Eui64)
+			EXPORT_H( 28, NodeId)
 		END_MODULE
 
 		// Special case with ioman and iomanX

@@ -1735,8 +1735,13 @@ namespace R3000A
 				for (int i = 0; i < 8; i++)
 					k.peerEui[i] = iopMemRead8(a1 + 4 + i);
 				k.connected = true;
+				// Not ILSOCK's Connect: with no node of that EUI64 on its bus, it fails, and the game takes the
+				// peer it heard as gone (AL3LOAD 0x1b84a0: on an error it goes back to listening for hellos).
+				v0 = 0;
+				pc = ra;
+				return 1;
 			}
-			return 0; // and ILSOCK's Connect
+			return 0;
 		}
 
 		int Send_HLE()

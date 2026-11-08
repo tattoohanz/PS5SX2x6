@@ -1609,6 +1609,28 @@ namespace R3000A
 			static bool eq2(const u8* a, const u8* b) { return a[0] == b[0] && a[1] == b[1]; }
 
 			// Everything waiting on the UDP socket, into the queues of the sockets bound to its destination port.
+			// Into the queue of the socket bound to the destination port.
+			static bool enqueue(const u8* srcGuid, const u8* srcPort, const u8* dstPort, const u8* data, u32 len)
+			{
+				if (dstPort[0] == 0 && dstPort[1] == 0)
+					return false;
+				for (ILSock& k : s_socks)
+				{
+					if (!eq2(k.port, dstPort))
+						continue;
+					if (k.queue.size() >= 64)
+						k.queue.erase(k.queue.begin());
+					Packet p;
+					std::memcpy(p.srcGuid, srcGuid, 8);
+					std::memcpy(p.srcPort, srcPort, 2);
+					p.len = std::min(len, kMaxData);
+					std::memcpy(p.data, data, p.len);
+					k.queue.push_back(p);
+					return true;
+				}
+				return false;
+			}
+
 			static void poll()
 			{
 				u8 dg[24 + kMaxData];
@@ -1630,22 +1652,7 @@ namespace R3000A
 					bool forMe = true;
 					for (int i = 0; i < 8; i++)
 						forMe = forMe && (dstEui[i] == 0xff || dstEui[i] == s_guid[i]);
-					bool queued = false;
-					for (ILSock& k : s_socks)
-					{
-						if (!eq2(k.port, dstPort) || (dstPort[0] == 0 && dstPort[1] == 0))
-							continue;
-						if (k.queue.size() >= 64)
-							k.queue.erase(k.queue.begin());
-						Packet p;
-						std::memcpy(p.srcGuid, dg + 4, 8);
-						std::memcpy(p.srcPort, dg + 22, 2);
-						p.len = static_cast<u32>(n - 24);
-						std::memcpy(p.data, dg + 24, p.len);
-						k.queue.push_back(p);
-						queued = true;
-						break;
-					}
+					const bool queued = enqueue(dg + 4, dg + 22, dstPort, dg + 24, static_cast<u32>(n - 24));
 					s_rxCount++;
 					if (s_rxCount <= 20 || (s_rxCount % 600) == 0)
 					{
@@ -1670,6 +1677,15 @@ namespace R3000A
 					dg[24 + i] = iopMemRead8(buf + i);
 				const int r = static_cast<int>(sendto(s_udp, reinterpret_cast<const char*>(dg), 24 + len, 0,
 					reinterpret_cast<const sockaddr*>(&s_peer), sizeof(s_peer)));
+				// A broadcast reaches the sender's own sockets too, as on the bus: the game counts on it. In the VS
+				// handshake (AL3LOAD 0x1b7fc0) the accepting side broadcasts the ack (word 1 = 4) and then waits for
+				// an ack itself (state bit 0x10, set at 0x1b8330) for 181 frames; without its own copy it gives up.
+				// Its own hellos it skips by GUID (0x1b83xx) or by their "connected" bit.
+				bool broadcast = true;
+				for (int i = 0; i < 8; i++)
+					broadcast = broadcast && dstEui[i] == 0xff;
+				if (broadcast)
+					enqueue(s_guid, s_socks[s].port, dstPort, dg + 24, len);
 				s_txCount++;
 				if (s_txCount <= 5 || (s_txCount % 600) == 0 || r < 0)
 					Console.WriteLn("[ilnet] tx #%u s=%u %u bytes to port %02x%02x -> %d", s_txCount, s, len, dstPort[0], dstPort[1], r);

@@ -1370,29 +1370,49 @@ namespace R3000A
 			s_pendCount = 0;
 		}
 
-		// The whole packet, only when it differs from the last one on that socket.
-		static u8 s_lastSend[4][0x200];
-		static u32 s_lastLen[4];
-		static u32 s_sendChanges;
+		// The whole packet when it differs from the last one of the same kind, leaving out the word at 0x10, which
+		// the game counts up in every packet. Up to the last non-zero byte; at most 3000 lines of each kind.
+		static u8 s_lastPkt[2][4][0x200];
+		static u32 s_lastPktLen[2][4];
+		static u32 s_pktChanges[2];
+
+		static void ilPacketChanged(int dir, u32 s, const u8* data, u32 len, u32 call)
+		{
+			static const char* const kName[2] = {"Send", "Recv"};
+			if (s >= 4 || s_pktChanges[dir] >= 3000)
+				return;
+			const u32 n = std::min<u32>(len, 0x200);
+			int firstDiff = (n != s_lastPktLen[dir][s]) ? 0 : -1;
+			for (u32 i = 0; i < n && firstDiff < 0; i++)
+				if ((i < 0x10 || i >= 0x14) && data[i] != s_lastPkt[dir][s][i])
+					firstDiff = static_cast<int>(i);
+			std::memcpy(s_lastPkt[dir][s], data, n);
+			s_lastPktLen[dir][s] = n;
+			if (firstDiff < 0)
+				return;
+			s_pktChanges[dir]++;
+			u32 used = n;
+			while (used > 0 && data[used - 1] == 0)
+				used--;
+			std::string hex;
+			hex.reserve(used * 2);
+			for (u32 i = 0; i < used; i++)
+			{
+				char h[3];
+				std::snprintf(h, sizeof(h), "%02x", data[i]);
+				hex += h;
+			}
+			Console.WriteLn("[ilink] %s packet changed #%u s=%d (call #%u, first diff at %x, %u bytes, zeros after %x) full=%s",
+				kName[dir], s_pktChanges[dir], s, call, firstDiff, n, used, hex.c_str());
+		}
 
 		static void ilSendFull(u32 s, u32 addr, u32 len)
 		{
-			if (s >= 4 || s_sendChanges >= 300)
-				return;
+			u8 data[0x200];
 			const u32 n = std::min<u32>(len, 0x200);
-			int firstDiff = (n != s_lastLen[s]) ? 0 : -1;
 			for (u32 i = 0; i < n; i++)
-			{
-				const u8 b = iopMemRead8(addr + i);
-				if (firstDiff < 0 && b != s_lastSend[s][i])
-					firstDiff = static_cast<int>(i);
-				s_lastSend[s][i] = b;
-			}
-			s_lastLen[s] = n;
-			if (firstDiff < 0)
-				return;
-			s_sendChanges++;
-			Console.WriteLn("[ilink] Send packet changed #%u s=%d (call #%u, first diff at %x) full=%s", s_sendChanges, s, s_calls[12], firstDiff, ilHex(addr, n, 0x200).c_str());
+				data[i] = iopMemRead8(addr + i);
+			ilPacketChanged(0, s, data, n, s_calls[12]);
 		}
 
 		void Init_DEBUG() { ilFlush(); if (ilLogThis(4)) Console.WriteLn("[ilink] Init (%x, %x)", a0, a1); }
@@ -1801,6 +1821,7 @@ namespace R3000A
 			const u32 n = std::min(p.len, max);
 			for (u32 i = 0; i < n; i++)
 				iopMemWrite8(buf + i, p.data[i]);
+			ilPacketChanged(1, s, p.data, n, s_calls[fn]);
 			if (withFrom && args[4])
 			{
 				const u32 from = args[4];

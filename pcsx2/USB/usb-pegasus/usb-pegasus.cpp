@@ -38,6 +38,19 @@
 #include <memory>
 #include <vector>
 
+#ifdef _WIN32
+#include "common/RedtapeWindows.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <errno.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 namespace usb_pegasus
 {
 	static const uint8_t s_dev_descriptor[] = {
@@ -282,6 +295,7 @@ namespace usb_pegasus
 	// would listen on 9610 + GROUP and the other machines' broadcasts would be lost. Send the link broadcasts from
 	// 9610 + GROUP, so that port is bound and what comes to it reaches the game. Rewrites the port and the UDP checksum.
 	static void LogLinkState();
+	static u16 s_link_port = 0; // 9610 + GROUP, from the game's link broadcasts
 	static void UdpChecksum(const u8* ip, u8* udp, size_t room);
 
 	static void LinkFromListenPort(u8* f, size_t n)
@@ -297,6 +311,7 @@ namespace usb_pegasus
 		const u16 dport = static_cast<u16>((udp[2] << 8) | udp[3]);
 		if (dport < 9610 || dport > 9610 + 15)
 			return;
+		s_link_port = dport;
 		LogLinkState();
 		if (((udp[0] << 8) | udp[1]) == dport)
 			return;
@@ -481,6 +496,374 @@ namespace usb_pegasus
 		}
 	}
 
+	// BG3's cabinet link before a race: one machine connects by TCP to the other's 9610 + GROUP (the address it has
+	// from the link packets, the other machine's on the LAN). The sockets adapter only makes connections out, so on the
+	// host nothing listened there and the connection was refused ("LAN error"). This listens on the host's
+	// 9610 + GROUP (learnt from the link broadcasts) and carries each connection to the game as a TCP connection from
+	// the other machine's address: the SYN, the data both ways and the closing are made here, and the game's side of
+	// these connections doesn't go to the sockets adapter. No retransmission: the game's side is in memory here.
+	namespace link_tcp
+	{
+#ifdef _WIN32
+		using Sock = SOCKET;
+		static constexpr Sock kNoSock = INVALID_SOCKET;
+		static int LastError() { return WSAGetLastError(); }
+		static bool WouldBlock(int e) { return e == WSAEWOULDBLOCK; }
+		static void CloseSock(Sock s) { closesocket(s); }
+		static void NonBlocking(Sock s)
+		{
+			u_long on = 1;
+			ioctlsocket(s, FIONBIO, &on);
+		}
+#else
+		using Sock = int;
+		static constexpr Sock kNoSock = -1;
+		static int LastError() { return errno; }
+		static bool WouldBlock(int e) { return e == EWOULDBLOCK || e == EAGAIN; }
+		static void CloseSock(Sock s) { close(s); }
+		static void NonBlocking(Sock s)
+		{
+			int on = 1;
+			ioctl(s, FIONBIO, &on);
+		}
+#endif
+		static constexpr size_t kMss = 1460;
+
+		struct Conn
+		{
+			Sock sock = kNoSock;
+			u8 peer[4]{};
+			u16 peer_port = 0;
+			u32 seq = 0;        // our next sequence number to the game
+			u32 acked = 0;      // what the game has acknowledged of ours
+			u32 game_next = 0;  // the game's next sequence number we expect
+			u32 window = 0;     // the game's receive window
+			bool established = false;
+			bool host_fin = false; // the other machine closed: FIN sent to the game
+			bool game_fin = false; // the game closed: the host socket shut for sending
+			u64 rx_bytes = 0, tx_bytes = 0;
+		};
+
+		struct State
+		{
+			Sock listen = kNoSock;
+			u16 port = 0;
+			bool failed = false;
+			bool known = false; // the game's address and both MACs, from its frames
+			u8 game_ip[4]{};
+			u8 game_mac[6]{};
+			u8 gw_mac[6]{};
+			u16 ip_id = 1;
+			std::vector<Conn> conns;
+		};
+		static State s_tcp;
+
+		// The game's address and MAC, and the MAC it sends to off its network (the sockets adapter's), from a frame it sent.
+		static void Learn(const u8* f, size_t n)
+		{
+			if (s_tcp.known || n < 34 || f[12] != 0x08 || f[13] != 0x00 || f[0] == 0xFF || (f[0] & 1))
+				return;
+			// Only a frame to an address off the game's /24: that one goes to the gateway's MAC.
+			if (f[26] == 0 || std::memcmp(f + 26, f + 30, 3) == 0)
+				return;
+			std::memcpy(s_tcp.game_ip, f + 26, 4);
+			std::memcpy(s_tcp.game_mac, f + 6, 6);
+			std::memcpy(s_tcp.gw_mac, f, 6);
+			s_tcp.known = true;
+		}
+
+		static void Listen(u16 port)
+		{
+			if (s_tcp.listen != kNoSock || s_tcp.failed)
+				return;
+			Sock l = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			if (l == kNoSock)
+			{
+				s_tcp.failed = true;
+				Console.Error("PEGASUS: link TCP: no socket (%d)", LastError());
+				return;
+			}
+			int one = 1;
+			setsockopt(l, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+			sockaddr_in a{};
+			a.sin_family = AF_INET;
+			a.sin_port = htons(port);
+			a.sin_addr.s_addr = htonl(INADDR_ANY);
+			if (bind(l, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(l, 4) != 0)
+			{
+				Console.Error("PEGASUS: link TCP: can't listen on port %u (%d)", port, LastError());
+				CloseSock(l);
+				s_tcp.failed = true;
+				return;
+			}
+			NonBlocking(l);
+			s_tcp.listen = l;
+			s_tcp.port = port;
+			Console.WriteLn("PEGASUS: link TCP: listening on port %u for the other machines", port);
+		}
+
+		// A TCP segment to the game, from conn's peer. flags: TCP flags; data: payload.
+		static void Send(PegasusState* s, const Conn& c, u8 flags, const u8* data, size_t len, bool mss = false)
+		{
+			const size_t optlen = mss ? 4 : 0;
+			const size_t tcplen = 20 + optlen + len;
+			const size_t total = 20 + tcplen;
+			const size_t flen = 14 + total;
+			std::vector<u8> f(flen, 0);
+			std::memcpy(&f[0], s_tcp.game_mac, 6);
+			std::memcpy(&f[6], s_tcp.gw_mac, 6);
+			f[12] = 0x08;
+			u8* ip = &f[14];
+			ip[0] = 0x45;
+			ip[2] = static_cast<u8>(total >> 8);
+			ip[3] = static_cast<u8>(total);
+			const u16 id = s_tcp.ip_id++;
+			ip[4] = static_cast<u8>(id >> 8);
+			ip[5] = static_cast<u8>(id);
+			ip[6] = 0x40; // DF
+			ip[8] = 64;
+			ip[9] = 6;
+			std::memcpy(ip + 12, c.peer, 4);
+			std::memcpy(ip + 16, s_tcp.game_ip, 4);
+			const u16 ipsum = Fold(SumBytes(0, ip, 20));
+			ip[10] = static_cast<u8>(ipsum >> 8);
+			ip[11] = static_cast<u8>(ipsum);
+			u8* t = ip + 20;
+			t[0] = static_cast<u8>(c.peer_port >> 8);
+			t[1] = static_cast<u8>(c.peer_port);
+			t[2] = static_cast<u8>(s_tcp.port >> 8);
+			t[3] = static_cast<u8>(s_tcp.port);
+			const u32 seq = (flags & 0x02) ? c.seq - 1 : c.seq; // a SYN carries the sequence number before the first
+			const u32 ack = c.game_next;
+			for (int i = 0; i < 4; i++)
+			{
+				t[4 + i] = static_cast<u8>(seq >> (24 - 8 * i));
+				t[8 + i] = static_cast<u8>(ack >> (24 - 8 * i));
+			}
+			t[12] = static_cast<u8>(((20 + optlen) / 4) << 4);
+			t[13] = flags;
+			t[14] = 0xFF; // window 65535
+			t[15] = 0xFF;
+			if (mss)
+			{
+				t[20] = 2;
+				t[21] = 4;
+				t[22] = static_cast<u8>(kMss >> 8);
+				t[23] = static_cast<u8>(kMss);
+			}
+			if (len)
+				std::memcpy(t + 20 + optlen, data, len);
+			u32 sum = SumBytes(0, ip + 12, 8);
+			sum += 6 + static_cast<u32>(tcplen);
+			const u16 tsum = Fold(SumBytes(sum, t, tcplen));
+			t[16] = static_cast<u8>(tsum >> 8);
+			t[17] = static_cast<u8>(tsum);
+			// Wire format, as the frames from the network (see HandleData).
+			const size_t wlen = std::max<size_t>(flen, 60);
+			std::vector<u8> w(wlen + 8, 0);
+			std::memcpy(w.data(), f.data(), flen);
+			const size_t wl = wlen + 4;
+			w[wlen + 4] = static_cast<u8>(wl);
+			w[wlen + 5] = static_cast<u8>((wl >> 8) & 0x0F);
+			s->rx.push_back(std::move(w));
+		}
+
+		static void Drop(size_t i, const char* why)
+		{
+			Conn& c = s_tcp.conns[i];
+			Console.WriteLn("PEGASUS: link TCP from %u.%u.%u.%u:%u closed (%s): %llu bytes to the game, %llu from it",
+				c.peer[0], c.peer[1], c.peer[2], c.peer[3], c.peer_port, why,
+				static_cast<unsigned long long>(c.rx_bytes), static_cast<unsigned long long>(c.tx_bytes));
+			if (c.sock != kNoSock)
+				CloseSock(c.sock);
+			s_tcp.conns.erase(s_tcp.conns.begin() + static_cast<std::ptrdiff_t>(i));
+		}
+
+		// Called with every bulk IN: new connections, and what the other machines sent, to the game.
+		static void Poll(PegasusState* s)
+		{
+			if (s_tcp.listen == kNoSock || !s_tcp.known)
+				return;
+			for (;;)
+			{
+				sockaddr_in a{};
+				socklen_t al = sizeof(a);
+				const Sock c = accept(s_tcp.listen, reinterpret_cast<sockaddr*>(&a), &al);
+				if (c == kNoSock)
+					break;
+				NonBlocking(c);
+				int one = 1;
+				setsockopt(c, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof(one));
+				Conn n;
+				n.sock = c;
+				const u32 addr = ntohl(a.sin_addr.s_addr);
+				for (int i = 0; i < 4; i++)
+					n.peer[i] = static_cast<u8>(addr >> (24 - 8 * i));
+				n.peer_port = ntohs(a.sin_port);
+				n.seq = 0x42470000u + (static_cast<u32>(n.peer_port) << 8) + 1; // after the SYN
+				n.acked = n.seq - 1;
+				Console.WriteLn("PEGASUS: link TCP from %u.%u.%u.%u:%u accepted, SYN to the game's %u.%u.%u.%u:%u",
+					n.peer[0], n.peer[1], n.peer[2], n.peer[3], n.peer_port,
+					s_tcp.game_ip[0], s_tcp.game_ip[1], s_tcp.game_ip[2], s_tcp.game_ip[3], s_tcp.port);
+				Send(s, n, 0x02, nullptr, 0, true);
+				s_tcp.conns.push_back(n);
+			}
+			for (size_t i = 0; i < s_tcp.conns.size();)
+			{
+				Conn& c = s_tcp.conns[i];
+				bool dropped = false;
+				while (c.established && !c.host_fin && s->rx.size() < 32)
+				{
+					const u32 inflight = c.seq - c.acked;
+					if (inflight + kMss > c.window)
+						break;
+					u8 buf[kMss];
+					const int r = recv(c.sock, reinterpret_cast<char*>(buf), static_cast<int>(kMss), 0);
+					if (r > 0)
+					{
+						Send(s, c, 0x18, buf, static_cast<size_t>(r)); // PSH ACK
+						c.seq += static_cast<u32>(r);
+						c.rx_bytes += static_cast<u64>(r);
+						continue;
+					}
+					if (r == 0)
+					{
+						Send(s, c, 0x11, nullptr, 0); // FIN ACK
+						c.seq += 1;
+						c.host_fin = true;
+						Console.WriteLn("PEGASUS: link TCP from %u.%u.%u.%u:%u: the other machine closed, FIN to the game",
+							c.peer[0], c.peer[1], c.peer[2], c.peer[3], c.peer_port);
+						break;
+					}
+					if (!WouldBlock(LastError()))
+					{
+						Send(s, c, 0x14, nullptr, 0); // RST ACK
+						Drop(i, "the other machine's socket failed");
+						dropped = true;
+					}
+					break;
+				}
+				if (dropped)
+					continue;
+				if (c.host_fin && c.game_fin && c.acked == c.seq)
+				{
+					Drop(i, "both sides closed");
+					continue;
+				}
+				i++;
+			}
+		}
+
+		// A frame the game sent: if it belongs to one of these connections, handle it here and return true (it doesn't
+		// go to the sockets adapter).
+		static bool FromGame(PegasusState* s, const u8* f, size_t n)
+		{
+			if (s_tcp.listen == kNoSock || n < 54 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 6)
+				return false;
+			const size_t ihl = static_cast<size_t>(f[14] & 0x0F) * 4;
+			const size_t total = static_cast<size_t>((f[16] << 8) | f[17]);
+			if (ihl < 20 || 14 + total > n || total < ihl + 20)
+				return false;
+			const u8* ip = f + 14;
+			const u8* t = ip + ihl;
+			if (((t[0] << 8) | t[1]) != s_tcp.port)
+				return false;
+			const u16 dport = static_cast<u16>((t[2] << 8) | t[3]);
+			size_t i = 0;
+			while (i < s_tcp.conns.size() && !(s_tcp.conns[i].peer_port == dport && std::memcmp(s_tcp.conns[i].peer, ip + 16, 4) == 0))
+				i++;
+			if (i == s_tcp.conns.size())
+			{
+				// The game's listening port, to no connection made here: the game answering one already closed.
+				return true;
+			}
+			Conn& c = s_tcp.conns[i];
+			const u8 flags = t[13];
+			const u32 seq = (static_cast<u32>(t[4]) << 24) | (t[5] << 16) | (t[6] << 8) | t[7];
+			const u32 ack = (static_cast<u32>(t[8]) << 24) | (t[9] << 16) | (t[10] << 8) | t[11];
+			const size_t doff = static_cast<size_t>(t[12] >> 4) * 4;
+			const size_t dlen = total - ihl >= doff ? total - ihl - doff : 0;
+			if (flags & 0x04) // RST
+			{
+				Drop(i, c.established ? "the game reset it" : "the game refused it");
+				return true;
+			}
+			if (!c.established)
+			{
+				if ((flags & 0x12) != 0x12) // waiting for SYN ACK
+					return true;
+				c.game_next = seq + 1;
+				c.acked = ack;
+				c.window = static_cast<u32>((t[14] << 8) | t[15]);
+				c.established = true;
+				Send(s, c, 0x10, nullptr, 0); // ACK
+				Console.WriteLn("PEGASUS: link TCP from %u.%u.%u.%u:%u: the game accepted it",
+					c.peer[0], c.peer[1], c.peer[2], c.peer[3], c.peer_port);
+				return true;
+			}
+			if (flags & 0x10)
+			{
+				if (static_cast<s32>(ack - c.acked) > 0 && static_cast<s32>(ack - c.seq) <= 0)
+					c.acked = ack;
+				c.window = static_cast<u32>((t[14] << 8) | t[15]);
+			}
+			bool reply = false;
+			if (dlen)
+			{
+				if (seq == c.game_next && !c.game_fin)
+				{
+					const char* d = reinterpret_cast<const char*>(t + doff);
+					size_t sent = 0;
+					u32 spins = 0;
+					while (sent < dlen && spins < 200000)
+					{
+						const int w = ::send(c.sock, d + sent, static_cast<int>(dlen - sent), 0);
+						if (w > 0)
+						{
+							sent += static_cast<size_t>(w);
+							continue;
+						}
+						if (w < 0 && WouldBlock(LastError()))
+						{
+							spins++; // the other machine's socket is full for a moment
+							continue;
+						}
+						Send(s, c, 0x14, nullptr, 0);
+						Drop(i, "sending to the other machine failed");
+						return true;
+					}
+					if (sent < dlen)
+					{
+						Send(s, c, 0x14, nullptr, 0);
+						Drop(i, "the other machine's socket stayed full");
+						return true;
+					}
+					c.game_next += static_cast<u32>(dlen);
+					c.tx_bytes += dlen;
+				}
+				reply = true; // also a repeated segment: acknowledge again
+			}
+			if ((flags & 0x01) && seq + dlen == c.game_next && !c.game_fin)
+			{
+				c.game_next += 1;
+				c.game_fin = true;
+#ifdef _WIN32
+				shutdown(c.sock, SD_SEND);
+#else
+				shutdown(c.sock, SHUT_WR);
+#endif
+				Console.WriteLn("PEGASUS: link TCP from %u.%u.%u.%u:%u: the game closed",
+					c.peer[0], c.peer[1], c.peer[2], c.peer[3], c.peer_port);
+				reply = true;
+			}
+			if (reply)
+				Send(s, c, 0x10, nullptr, 0);
+			if (c.host_fin && c.game_fin && c.acked == c.seq)
+				Drop(i, "both sides closed");
+			return true;
+		}
+	} // namespace link_tcp
+
 	static void HandleReset(USBDevice* dev)
 	{
 		Reset(USB_CONTAINER_OF(dev, PegasusState, dev));
@@ -539,7 +922,14 @@ namespace usb_pegasus
 								RedirectTelnet(s, s->tx.data() + 2, len, true);
 								LinkFromListenPort(s->tx.data() + 2, len);
 								LinkRecordSent(s->tx.data() + 2, len);
-								if (s->net)
+								link_tcp::Learn(s->tx.data() + 2, len);
+								if (s_link_port)
+									link_tcp::Listen(s_link_port);
+								if (link_tcp::FromGame(s, s->tx.data() + 2, len))
+								{
+									// one of the other machines' connections to the game: answered here
+								}
+								else if (s->net)
 								{
 									NetPacket pkt(s->tx.data() + 2, static_cast<int>(len));
 									s->net->send(&pkt);
@@ -555,6 +945,7 @@ namespace usb_pegasus
 			case USB_TOKEN_IN:
 				if (p->ep->nr == 1)
 				{
+					link_tcp::Poll(s);
 					// Pull what the network has for us, as the PS2 adapter's receive thread does.
 					if (s->net)
 					{

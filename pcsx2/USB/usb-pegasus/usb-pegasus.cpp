@@ -28,6 +28,7 @@
 #include "DEV9/sockets.h"
 #include "common/StringUtil.h"
 #include "common/SettingsInterface.h"
+#include "Memory.h"
 
 #include <algorithm>
 #include <array>
@@ -280,6 +281,8 @@ namespace usb_pegasus
 	// 9610 + GROUP. The sockets adapter binds on the host only the source port of what the game sends, so nothing
 	// would listen on 9610 + GROUP and the other machines' broadcasts would be lost. Send the link broadcasts from
 	// 9610 + GROUP, so that port is bound and what comes to it reaches the game. Rewrites the port and the UDP checksum.
+	static void LogLinkState();
+
 	static void LinkFromListenPort(u8* f, size_t n)
 	{
 		if (n < 42 || f[0] != 0xFF || f[1] != 0xFF || f[12] != 0x08 || f[13] != 0x00 || f[23] != 17)
@@ -291,7 +294,10 @@ namespace usb_pegasus
 		u8* ip = f + 14;
 		u8* udp = ip + ihl;
 		const u16 dport = static_cast<u16>((udp[2] << 8) | udp[3]);
-		if (dport < 9610 || dport > 9610 + 15 || ((udp[0] << 8) | udp[1]) == dport)
+		if (dport < 9610 || dport > 9610 + 15)
+			return;
+		LogLinkState();
+		if (((udp[0] << 8) | udp[1]) == dport)
 			return;
 		static bool s_logged = false;
 		if (!s_logged)
@@ -351,6 +357,59 @@ namespace usb_pegasus
 			return;
 		Console.WriteLn("PEGASUS: link RX #%u from %u.%u.%u.%u:%u to port %u, %u bytes (from this address: %u)",
 			s_all, f[26], f[27], f[28], f[29], (udp[0] << 8) | udp[1], dport, static_cast<unsigned>(n), c);
+	}
+
+	// Log only: BG3's own view of the cabinet link, read from the game's memory: the link flags, the 4 "machine
+	// present" words and the 4 machines' entries (24 bytes each; +0x0C state, +0x14 timer, which is left out of the
+	// change test). Logged when something but a timer changes, and every 240th link packet. Addresses are those of the
+	// status screen ("No %d : Connect (Timer %d)"), checked against that string first.
+	static void LogLinkState()
+	{
+		struct Layout
+		{
+			const char* game;
+			u32 text, flags, table;
+		};
+		static constexpr Layout layouts[] = {
+			{"BG3", 0x276230, 0x4d0da0, 0x4d0e68}, // BGRLOAD (NM00010)
+			{"BG3 Tuned", 0x29bd30, 0x4fff68, 0x500030}, // BGTLOAD (NM00015)
+		};
+		static constexpr char text[] = "No %d : Connect (Timer %d)";
+		if (!eeMem)
+			return;
+		const Layout* l = nullptr;
+		for (const Layout& c : layouts)
+			if (std::memcmp(&eeMem->Main[c.text], text, sizeof(text)) == 0)
+				l = &c;
+		if (!l)
+			return;
+		u8 now[4 + 16 + 4 * 24];
+		std::memcpy(now, &eeMem->Main[l->flags], 4);
+		std::memcpy(now + 4, &eeMem->Main[l->flags + 0x30], 16);
+		std::memcpy(now + 20, &eeMem->Main[l->table], 4 * 24);
+		u8 cmp[sizeof(now)];
+		std::memcpy(cmp, now, sizeof(now));
+		for (int i = 0; i < 4; i++)
+			std::memset(cmp + 20 + i * 24 + 0x14, 0, 4);
+		static u8 s_last[sizeof(now)] = {};
+		static u32 s_calls = 0;
+		const bool changed = std::memcmp(cmp, s_last, sizeof(cmp)) != 0;
+		if (!changed && (++s_calls % 240) != 0)
+			return;
+		std::memcpy(s_last, cmp, sizeof(cmp));
+		u32 flags, present[4];
+		std::memcpy(&flags, now, 4);
+		std::memcpy(present, now + 4, 16);
+		Console.WriteLn("PEGASUS: link state (%s)%s: flags %08X, present %X %X %X %X", l->game, changed ? " changed" : "",
+			flags, present[0], present[1], present[2], present[3]);
+		for (int i = 0; i < 4; i++)
+		{
+			const u8* e = now + 20 + i * 24;
+			std::string hex;
+			for (int j = 0; j < 24; j++)
+				hex += fmt::format("{:02X}{}", e[j], (j % 4) == 3 ? " " : "");
+			Console.WriteLn("PEGASUS:   No %d: %s", i + 1, hex.c_str());
+		}
 	}
 
 	static void HandleReset(USBDevice* dev)

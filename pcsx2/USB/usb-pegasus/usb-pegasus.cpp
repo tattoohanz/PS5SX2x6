@@ -29,6 +29,7 @@
 #include "common/StringUtil.h"
 #include "common/SettingsInterface.h"
 #include "Memory.h"
+#include "common/Timer.h"
 
 #include <algorithm>
 #include <array>
@@ -345,6 +346,66 @@ namespace usb_pegasus
 		udp[7] = static_cast<u8>(usum);
 	}
 
+	// Log only: the link traffic every 2 seconds, to see where the other machine's packets wait or get lost: link
+	// packets sent, received per source (with the state bytes +0x0C..+0x0F of the last one, to compare with the
+	// other machine's log), own ones dropped, frames handed to the game, bulk INs that found nothing, and the most
+	// frames waiting for the game at once.
+	namespace link_stats
+	{
+		struct Src
+		{
+			u8 ip[4]{};
+			u32 count = 0;
+			u8 state[4]{};
+		};
+		static Src s_src[4];
+		static u32 s_tx = 0, s_own = 0, s_to_game = 0, s_in_empty = 0, s_in_frames = 0;
+		static size_t s_max_queue = 0;
+		static u8 s_sent_state[4]{};
+		static Common::Timer s_timer;
+
+		static void Sent(const u8* payload)
+		{
+			s_tx++;
+			std::memcpy(s_sent_state, payload + 0x0C, 4);
+		}
+		static void Received(const u8* ip, const u8* payload)
+		{
+			for (Src& r : s_src)
+			{
+				if (r.count == 0 && r.ip[0] == 0)
+					std::memcpy(r.ip, ip + 12, 4);
+				if (std::memcmp(r.ip, ip + 12, 4) == 0)
+				{
+					r.count++;
+					std::memcpy(r.state, payload + 0x0C, 4);
+					return;
+				}
+			}
+		}
+		static void Flush(size_t queue)
+		{
+			s_max_queue = std::max(s_max_queue, queue);
+			if (s_timer.GetTimeSeconds() < 2.0)
+				return;
+			const double t = s_timer.GetTimeSeconds();
+			s_timer.Reset();
+			std::string rx;
+			for (const Src& r : s_src)
+				if (r.ip[0])
+					rx += fmt::format(" {}.{}.{}.{}: {} (state {:02X}{:02X}{:02X}{:02X})", r.ip[0], r.ip[1], r.ip[2], r.ip[3],
+						r.count, r.state[0], r.state[1], r.state[2], r.state[3]);
+			Console.WriteLn("PEGASUS: link %.1fs: sent %u (state %02X%02X%02X%02X), own back %u, to the game %u frames, "
+							"IN %u with a frame / %u empty, most waiting %zu; received:%s",
+				t, s_tx, s_sent_state[0], s_sent_state[1], s_sent_state[2], s_sent_state[3], s_own, s_to_game,
+				s_in_frames, s_in_empty, s_max_queue, rx.c_str());
+			s_tx = s_own = s_to_game = s_in_empty = s_in_frames = 0;
+			s_max_queue = 0;
+			for (Src& r : s_src)
+				r.count = 0;
+		}
+	} // namespace link_stats
+
 	// BG3's link packets (0x78 bytes) name their sender by the IP at +8, the game's own address. Every emulator's
 	// game has the same one (192.0.2.100, the sockets adapter's), so the other machine's packets were taken for the
 	// game's own and nobody else showed up. A packet that comes in gets the address it really came from at +8 (the
@@ -379,6 +440,7 @@ namespace usb_pegasus
 		if (!p)
 			return;
 		std::memcpy(s_link_sent[s_link_sent_next].data(), p, LINK_PAYLOAD);
+		link_stats::Sent(p);
 		s_link_sent_next = (s_link_sent_next + 1) % s_link_sent.size();
 	}
 
@@ -394,11 +456,13 @@ namespace usb_pegasus
 		{
 			if (std::memcmp(sent.data(), p, LINK_PAYLOAD) == 0)
 			{
+				link_stats::s_own++;
 				if ((s_own++ % 1000) == 0)
 					Console.WriteLn("PEGASUS: link packet the game sent itself came back, dropped (%u so far)", s_own);
 				return false;
 			}
 		}
+		link_stats::Received(ip, p);
 		if (std::memcmp(p + 8, ip + 12, 4) != 0)
 		{
 			if ((s_fixed++ % 1000) == 0)
@@ -968,13 +1032,17 @@ namespace usb_pegasus
 							w[flen + 4] = static_cast<u8>(wl);
 							w[flen + 5] = static_cast<u8>((wl >> 8) & 0x0F);
 							s->rx.push_back(std::move(w));
+							link_stats::s_to_game++;
 						}
 					}
+					link_stats::Flush(s->rx.size());
 					if (s->rx.empty())
 					{
+						link_stats::s_in_empty++;
 						p->status = USB_RET_NAK;
 						break;
 					}
+					link_stats::s_in_frames++;
 					std::vector<u8>& f = s->rx.front();
 					usb_packet_copy(p, f.data(), std::min<size_t>(f.size(), p->buffer_size));
 					s->rx.pop_front();

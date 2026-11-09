@@ -276,6 +276,83 @@ namespace usb_pegasus
 		tcp[17] = static_cast<u8>(tsum);
 	}
 
+	// BG3's cabinet link: every machine broadcasts UDP to port 9610 + GROUP from a port of its own and listens on
+	// 9610 + GROUP. The sockets adapter binds on the host only the source port of what the game sends, so nothing
+	// would listen on 9610 + GROUP and the other machines' broadcasts would be lost. Send the link broadcasts from
+	// 9610 + GROUP, so that port is bound and what comes to it reaches the game. Rewrites the port and the UDP checksum.
+	static void LinkFromListenPort(u8* f, size_t n)
+	{
+		if (n < 42 || f[0] != 0xFF || f[1] != 0xFF || f[12] != 0x08 || f[13] != 0x00 || f[23] != 17)
+			return;
+		const size_t ihl = static_cast<size_t>(f[14] & 0x0F) * 4;
+		const size_t total = static_cast<size_t>((f[16] << 8) | f[17]);
+		if (ihl < 20 || total < ihl + 8 || 14 + total > n)
+			return;
+		u8* ip = f + 14;
+		u8* udp = ip + ihl;
+		const u16 dport = static_cast<u16>((udp[2] << 8) | udp[3]);
+		if (dport < 9610 || dport > 9610 + 15 || ((udp[0] << 8) | udp[1]) == dport)
+			return;
+		static bool s_logged = false;
+		if (!s_logged)
+		{
+			s_logged = true;
+			Console.WriteLn("PEGASUS: link broadcasts from port %u go out from %u (the port the game listens on)",
+				(udp[0] << 8) | udp[1], dport);
+		}
+		udp[0] = udp[2];
+		udp[1] = udp[3];
+		const size_t udplen = static_cast<size_t>((udp[4] << 8) | udp[5]);
+		if (udp[6] == 0 && udp[7] == 0) // no checksum
+			return;
+		if (udplen < 8 || udplen > total - ihl)
+		{
+			udp[6] = udp[7] = 0;
+			return;
+		}
+		udp[6] = udp[7] = 0;
+		u32 sum = SumBytes(0, ip + 12, 8); // source and destination
+		sum += 17 + static_cast<u32>(udplen);
+		u16 usum = Fold(SumBytes(sum, udp, udplen));
+		if (usum == 0)
+			usum = 0xFFFF;
+		udp[6] = static_cast<u8>(usum >> 8);
+		udp[7] = static_cast<u8>(usum);
+	}
+
+	// Log only: the link packets that come in from the other machines, by source address (first 3 of each, then
+	// every 1000th of all).
+	static void LogLinkRx(const u8* f, size_t n)
+	{
+		if (n < 42 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 17)
+			return;
+		const size_t ihl = static_cast<size_t>(f[14] & 0x0F) * 4;
+		if (n < 14 + ihl + 8)
+			return;
+		const u8* udp = f + 14 + ihl;
+		const u16 dport = static_cast<u16>((udp[2] << 8) | udp[3]);
+		if (dport < 9610 || dport > 9610 + 15)
+			return;
+		static u32 s_ips[8] = {};
+		static u32 s_counts[8] = {};
+		static u32 s_all = 0;
+		const u32 src = (static_cast<u32>(f[26]) << 24) | (f[27] << 16) | (f[28] << 8) | f[29];
+		u32 i = 0;
+		while (i < 8 && s_counts[i] && s_ips[i] != src)
+			i++;
+		u32 c = 0;
+		if (i < 8)
+		{
+			s_ips[i] = src;
+			c = ++s_counts[i];
+		}
+		s_all++;
+		if (c > 3 && (s_all % 1000) != 0)
+			return;
+		Console.WriteLn("PEGASUS: link RX #%u from %u.%u.%u.%u:%u to port %u, %u bytes (from this address: %u)",
+			s_all, f[26], f[27], f[28], f[29], (udp[0] << 8) | udp[1], dport, static_cast<unsigned>(n), c);
+	}
+
 	static void HandleReset(USBDevice* dev)
 	{
 		Reset(USB_CONTAINER_OF(dev, PegasusState, dev));
@@ -332,6 +409,7 @@ namespace usb_pegasus
 							{
 								LogFrame("TX", s->tx_logged, s->tx.data() + 2, len);
 								RedirectTelnet(s, s->tx.data() + 2, len, true);
+								LinkFromListenPort(s->tx.data() + 2, len);
 								if (s->net)
 								{
 									NetPacket pkt(s->tx.data() + 2, static_cast<int>(len));
@@ -358,6 +436,7 @@ namespace usb_pegasus
 								continue;
 							RedirectTelnet(s, reinterpret_cast<u8*>(pkt.buffer), static_cast<size_t>(pkt.size), false);
 							LogFrame("RX", s->rx_logged, reinterpret_cast<const u8*>(pkt.buffer), static_cast<size_t>(pkt.size));
+							LogLinkRx(reinterpret_cast<const u8*>(pkt.buffer), static_cast<size_t>(pkt.size));
 							// Wire format: the frame (at least 60 bytes), 4 bytes of CRC, the trailer
 							// (length incl. CRC, low/high; status 0 = no error; 0).
 							const size_t flen = std::max<size_t>(static_cast<size_t>(pkt.size), 60);

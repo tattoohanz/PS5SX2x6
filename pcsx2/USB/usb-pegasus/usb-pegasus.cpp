@@ -282,6 +282,7 @@ namespace usb_pegasus
 	// would listen on 9610 + GROUP and the other machines' broadcasts would be lost. Send the link broadcasts from
 	// 9610 + GROUP, so that port is bound and what comes to it reaches the game. Rewrites the port and the UDP checksum.
 	static void LogLinkState();
+	static void UdpChecksum(const u8* ip, u8* udp, size_t room);
 
 	static void LinkFromListenPort(u8* f, size_t n)
 	{
@@ -308,15 +309,18 @@ namespace usb_pegasus
 		}
 		udp[0] = udp[2];
 		udp[1] = udp[3];
+		UdpChecksum(ip, udp, total - ihl);
+	}
+
+	// Recompute a UDP checksum (left at 0 if the packet had none, or its length doesn't fit).
+	static void UdpChecksum(const u8* ip, u8* udp, size_t room)
+	{
 		const size_t udplen = static_cast<size_t>((udp[4] << 8) | udp[5]);
 		if (udp[6] == 0 && udp[7] == 0) // no checksum
 			return;
-		if (udplen < 8 || udplen > total - ihl)
-		{
-			udp[6] = udp[7] = 0;
-			return;
-		}
 		udp[6] = udp[7] = 0;
+		if (udplen < 8 || udplen > room)
+			return;
 		u32 sum = SumBytes(0, ip + 12, 8); // source and destination
 		sum += 17 + static_cast<u32>(udplen);
 		u16 usum = Fold(SumBytes(sum, udp, udplen));
@@ -324,6 +328,71 @@ namespace usb_pegasus
 			usum = 0xFFFF;
 		udp[6] = static_cast<u8>(usum >> 8);
 		udp[7] = static_cast<u8>(usum);
+	}
+
+	// BG3's link packets (0x78 bytes) name their sender by the IP at +8, the game's own address. Every emulator's
+	// game has the same one (192.0.2.100, the sockets adapter's), so the other machine's packets were taken for the
+	// game's own and nobody else showed up. A packet that comes in gets the address it really came from at +8 (the
+	// other machine's on the LAN, unique to it); the host's own broadcasts come back to it too, and with a real
+	// address they would be a machine of their own, so a packet the game sent itself is dropped. Returns false to drop.
+	static constexpr size_t LINK_PAYLOAD = 0x78;
+	static std::array<std::array<u8, LINK_PAYLOAD>, 16> s_link_sent = {};
+	static size_t s_link_sent_next = 0;
+
+	static u8* LinkPayload(u8* f, size_t n, u8** ip_out, size_t* room_out)
+	{
+		if (n < 42 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 17)
+			return nullptr;
+		const size_t ihl = static_cast<size_t>(f[14] & 0x0F) * 4;
+		const size_t total = static_cast<size_t>((f[16] << 8) | f[17]);
+		if (ihl < 20 || total < ihl + 8 + LINK_PAYLOAD || 14 + total > n)
+			return nullptr;
+		u8* udp = f + 14 + ihl;
+		const u16 dport = static_cast<u16>((udp[2] << 8) | udp[3]);
+		if (dport < 9610 || dport > 9610 + 15 || ((udp[4] << 8) | udp[5]) != 8 + LINK_PAYLOAD)
+			return nullptr;
+		*ip_out = f + 14;
+		*room_out = total - ihl;
+		return udp + 8;
+	}
+
+	static void LinkRecordSent(u8* f, size_t n)
+	{
+		u8* ip;
+		size_t room;
+		const u8* p = LinkPayload(f, n, &ip, &room);
+		if (!p)
+			return;
+		std::memcpy(s_link_sent[s_link_sent_next].data(), p, LINK_PAYLOAD);
+		s_link_sent_next = (s_link_sent_next + 1) % s_link_sent.size();
+	}
+
+	static bool LinkFixReceived(u8* f, size_t n)
+	{
+		u8* ip;
+		size_t room;
+		u8* p = LinkPayload(f, n, &ip, &room);
+		if (!p)
+			return true;
+		static u32 s_own = 0, s_fixed = 0;
+		for (const auto& sent : s_link_sent)
+		{
+			if (std::memcmp(sent.data(), p, LINK_PAYLOAD) == 0)
+			{
+				if ((s_own++ % 1000) == 0)
+					Console.WriteLn("PEGASUS: link packet the game sent itself came back, dropped (%u so far)", s_own);
+				return false;
+			}
+		}
+		if (std::memcmp(p + 8, ip + 12, 4) != 0)
+		{
+			if ((s_fixed++ % 1000) == 0)
+				Console.WriteLn("PEGASUS: link packet from %u.%u.%u.%u named its sender %u.%u.%u.%u, now %u.%u.%u.%u (%u so far)",
+					ip[12], ip[13], ip[14], ip[15], p[8], p[9], p[10], p[11], ip[12], ip[13], ip[14], ip[15], s_fixed);
+			std::memcpy(p + 8, ip + 12, 4);
+			UdpChecksum(ip, ip + (static_cast<size_t>(ip[0] & 0x0F) * 4), room);
+		}
+		return true;
 	}
 
 	// Log only: the link packets that come in from the other machines, by source address (first 3 of each, then
@@ -469,6 +538,7 @@ namespace usb_pegasus
 								LogFrame("TX", s->tx_logged, s->tx.data() + 2, len);
 								RedirectTelnet(s, s->tx.data() + 2, len, true);
 								LinkFromListenPort(s->tx.data() + 2, len);
+								LinkRecordSent(s->tx.data() + 2, len);
 								if (s->net)
 								{
 									NetPacket pkt(s->tx.data() + 2, static_cast<int>(len));
@@ -496,6 +566,8 @@ namespace usb_pegasus
 							RedirectTelnet(s, reinterpret_cast<u8*>(pkt.buffer), static_cast<size_t>(pkt.size), false);
 							LogFrame("RX", s->rx_logged, reinterpret_cast<const u8*>(pkt.buffer), static_cast<size_t>(pkt.size));
 							LogLinkRx(reinterpret_cast<const u8*>(pkt.buffer), static_cast<size_t>(pkt.size));
+							if (!LinkFixReceived(reinterpret_cast<u8*>(pkt.buffer), static_cast<size_t>(pkt.size)))
+								continue;
 							// Wire format: the frame (at least 60 bytes), 4 bytes of CRC, the trailer
 							// (length incl. CRC, low/high; status 0 = no error; 0).
 							const size_t flen = std::max<size_t>(static_cast<size_t>(pkt.size), 60);
